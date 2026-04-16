@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>AristaMcp.Server</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AristaMcp.Core/AristaMcp.Core.csproj" />
+    <ProjectReference Include="../AristaMcp.Embedding/AristaMcp.Embedding.csproj" />
+    <ProjectReference Include="../AristaMcp.Data/AristaMcp.Data.csproj" />
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+</Project>

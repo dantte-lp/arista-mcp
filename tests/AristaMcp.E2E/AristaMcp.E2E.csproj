@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>AristaMcp.E2E</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/AristaMcp.Core/AristaMcp.Core.csproj" />
+    <ProjectReference Include="../../src/AristaMcp.Embedding/AristaMcp.Embedding.csproj" />
+    <ProjectReference Include="../../src/AristaMcp.Data/AristaMcp.Data.csproj" />
+    <ProjectReference Include="../../src/AristaMcp.Server/AristaMcp.Server.csproj" />
+    <ProjectReference Include="../../src/AristaMcp.Cli/AristaMcp.Cli.csproj" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+</Project>

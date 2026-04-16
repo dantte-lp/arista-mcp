@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>AristaMcp.Cli</RootNamespace>
+    <AssemblyName>arista-mcp</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AristaMcp.Core/AristaMcp.Core.csproj" />
+    <ProjectReference Include="../AristaMcp.Embedding/AristaMcp.Embedding.csproj" />
+    <ProjectReference Include="../AristaMcp.Data/AristaMcp.Data.csproj" />
+    <ProjectReference Include="../AristaMcp.Server/AristaMcp.Server.csproj" />
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Spectre.Console" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+</Project>
