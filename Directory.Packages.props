@@ -9,6 +9,12 @@
     <PackageVersion Include="Microsoft.Extensions.AI" Version="10.5.0" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.6" />
     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.CommandLine" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.6" />
     <!-- EF Core pinned to 9.x — Pgvector.EntityFrameworkCore 0.3.0 (latest) requires Npgsql.EFCore 9.0.1. -->
     <!-- Bump when Pgvector.EntityFrameworkCore releases an EF Core 10 compatible version. -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="9.0.15" />
