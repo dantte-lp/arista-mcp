@@ -13,7 +13,11 @@ services:
       POSTGRES_INITDB_ARGS: --data-checksums --encoding=UTF-8 --locale=C.UTF-8
       PGDATA: /var/lib/postgresql/18/data
     ports:
-      - "127.0.0.1:5434:5432"
+      # 0.0.0.0 rather than 127.0.0.1: on Windows/Podman (WSL2 backend, UserModeNetworking=false)
+      # a 127.0.0.1 bind only exposes the port inside the podman-machine WSL distro, unreachable
+      # from the Windows host. Binding to 0.0.0.0 inside WSL2 is forwarded back to Windows localhost
+      # via WSL interop. The dev container still only listens on the loopback exposed by WSL.
+      - "0.0.0.0:5434:5432"
     volumes:
       - arista-pgdata:/var/lib/postgresql/18/data
     command: >-
