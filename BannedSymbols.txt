@@ -1,0 +1,8 @@
+T:System.DateTime;use DateTimeOffset.UtcNow or TimeProvider
+P:System.DateTime.Now;use DateTimeOffset.UtcNow or TimeProvider
+P:System.DateTimeOffset.Now;use DateTimeOffset.UtcNow or TimeProvider
+T:System.Net.WebClient;use HttpClient
+M:System.Threading.Thread.Abort;removed in .NET Core
+T:System.Runtime.Serialization.Formatters.Binary.BinaryFormatter;use System.Text.Json
+M:System.Security.Cryptography.MD5.Create;use SHA256 or stronger
+M:System.Security.Cryptography.SHA1.Create;use SHA256 or stronger

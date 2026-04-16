@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AristaMcp.Core/AristaMcp.Core.csproj" />
+    <Project Path="src/AristaMcp.Embedding/AristaMcp.Embedding.csproj" />
+    <Project Path="src/AristaMcp.Data/AristaMcp.Data.csproj" />
+    <Project Path="src/AristaMcp.Server/AristaMcp.Server.csproj" />
+    <Project Path="src/AristaMcp.Cli/AristaMcp.Cli.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AristaMcp.Core.Tests/AristaMcp.Core.Tests.csproj" />
+    <Project Path="tests/AristaMcp.Embedding.Tests/AristaMcp.Embedding.Tests.csproj" />
+    <Project Path="tests/AristaMcp.Data.Tests/AristaMcp.Data.Tests.csproj" />
+    <Project Path="tests/AristaMcp.Server.Tests/AristaMcp.Server.Tests.csproj" />
+    <Project Path="tests/AristaMcp.E2E/AristaMcp.E2E.csproj" />
+  </Folder>
+</Solution>
