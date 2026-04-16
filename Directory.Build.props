@@ -8,6 +8,11 @@
     <WarningsNotAsErrors>CS1591</WarningsNotAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- MA0004: ConfigureAwait. Our code runs in console + ASP.NET Core hosts, never with
+         a UI SynchronizationContext, so the annotation is noise. MA0051: method length;
+         targeted suppression would require splitting COPY-writer loops into helpers
+         that are less readable than the flat form. -->
+    <NoWarn>$(NoWarn);MA0004;MA0051</NoWarn>
     <ErrorLog>$(MSBuildProjectDirectory)/bin/$(Configuration)/analyzers.sarif</ErrorLog>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
