@@ -5,7 +5,7 @@ obj/
 *.suo
 TestResults/
 coverage.*.xml
-models/
+/models/
 docker/.env
 docker/postgresql.conf
 arista-mcp.toml
