@@ -1,0 +1,6 @@
+FROM tensorchord/vchord-suite:pg18-latest
+
+COPY init.sql /docker-entrypoint-initdb.d/00-init.sql
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=10 \
+    CMD pg_isready -U ${POSTGRES_USER:-arista} -d ${POSTGRES_DB:-arista}
