@@ -1,7 +1,9 @@
 <Project>
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
   <PropertyGroup>
-    <!-- Test member names use Given_When_Then. CA1707 (no underscores) doesn't apply to tests. -->
-    <NoWarn>$(NoWarn);CA1707</NoWarn>
+    <!-- Test member names use Given_When_Then. CA1707 (no underscores) doesn't apply to tests.
+         CA1711 (type name ending) — xUnit convention is "FooCollection" for [CollectionDefinition].
+         MA0004 (ConfigureAwait) — test code runs without SynchronizationContext; the cost isn't worth the noise. -->
+    <NoWarn>$(NoWarn);CA1707;CA1711;MA0004</NoWarn>
   </PropertyGroup>
 </Project>
