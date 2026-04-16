@@ -6,7 +6,7 @@
 
 **Architecture:** Layered solution — `Core` (models, chunker, RRF, QueryExpander) ← `Embedding` (ONNX) + `Data` (EF Core + Pgvector) ← `Server` (MCP tools) ← `Cli` (System.CommandLine). Custom PostgreSQL image via `tensorchord/vchord-suite:pg18-latest` preloads pgvector + vchord + vchord_bm25 + pg_tokenizer. All models (snowflake-arctic-embed-m-v1.5 + bge-reranker-base) loaded via ONNX Runtime, CPU default with CUDA opt-in.
 
-**Tech Stack:** .NET 10 · ModelContextProtocol 1.2.0 · EF Core 10 · Npgsql 10 · Pgvector 0.3.2 · Pgvector.EntityFrameworkCore 0.3.0 · Microsoft.ML.OnnxRuntime 1.24.4 · Testcontainers.PostgreSql 4.7.0 · PostgreSQL 18 + pgvector 0.8.x + vchord_bm25 0.2.x · System.CommandLine · Spectre.Console · Podman
+**Tech Stack:** .NET 10 (SDK 10.0.201, TFM net10.0) · ModelContextProtocol 1.2.0 · **EF Core 9.0.15** (pinned — Pgvector.EntityFrameworkCore 0.3.0 lags EF 10) · Npgsql.EntityFrameworkCore.PostgreSQL 9.0.4 · Pgvector 0.3.2 · Pgvector.EntityFrameworkCore 0.3.0 · Microsoft.ML.OnnxRuntime 1.24.4 · Testcontainers.PostgreSql 4.11.0 · Microsoft.Extensions.AI 10.5.0 · Microsoft.Extensions.Hosting 10.0.6 · xUnit 2.9.3 · Microsoft.NET.Test.Sdk 18.4.0 · FluentAssertions 8.9.0 · Spectre.Console 0.55.0 · System.CommandLine 2.0.6 · PostgreSQL 18 + pgvector 0.8.x + vchord_bm25 0.2.x · Podman
 
 **Reference spec:** [`docs/superpowers/specs/2026-04-16-arista-mcp-design.md`](../specs/2026-04-16-arista-mcp-design.md)
 
@@ -342,7 +342,9 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 ALTER DATABASE arista SET search_path TO "$user", public, tokenizer_catalog, bm25_catalog;
 
-SELECT create_text_analyzer('english_analyzer', $$
+-- Must be called qualified — ALTER DATABASE ... SET search_path only affects future
+-- sessions, not the init script currently running.
+SELECT tokenizer_catalog.create_text_analyzer('english_analyzer', $$
     pre_tokenizer = "unicode_segmentation"
     [[character_filters]]
     to_lowercase = {}
@@ -386,6 +388,7 @@ services:
       - arista-pgdata:/var/lib/postgresql/18/data
     command: >-
       postgres
+      -c shared_preload_libraries=vector,vchord,vchord_bm25,pg_tokenizer
       -c max_connections=50
       -c shared_buffers=512MB
       -c effective_cache_size=2GB
@@ -1014,11 +1017,22 @@ EF Core cannot express `GENERATED ALWAYS AS (tokenize(content, 'english_analyzer
 
 ```sql
 -- src/AristaMcp.Data/Migrations/Manual/001_bm25v_column.sql
-ALTER TABLE chunks
-    ADD COLUMN bm25v bm25vector
-    GENERATED ALWAYS AS (tokenize(content, 'english_analyzer')) STORED;
+-- pg_tokenizer.rs tokenize() is STABLE (not IMMUTABLE), so STORED GENERATED columns
+-- are rejected. Use create_custom_model_tokenizer_and_trigger instead — it provisions
+-- a custom tokenizer + BM25 model + a BEFORE INSERT/UPDATE trigger that writes the
+-- bm25vector into target_column. Queries use bm25query + tokenize(@q, 'chunks_tokenizer').
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS bm25v bm25vector;
 
-CREATE INDEX idx_chunks_bm25 ON chunks USING bm25 (bm25v bm25_ops);
+SELECT tokenizer_catalog.create_custom_model_tokenizer_and_trigger(
+    tokenizer_name     => 'chunks_tokenizer',
+    model_name         => 'chunks_model',
+    text_analyzer_name => 'english_analyzer',
+    table_name         => 'chunks',
+    source_column      => 'content',
+    target_column      => 'bm25v'
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks USING bm25 (bm25v bm25_ops);
 ```
 
 - [ ] **Step 2: Apply manually**
