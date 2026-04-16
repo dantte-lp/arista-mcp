@@ -10,3 +10,7 @@ docker/.env
 docker/postgresql.conf
 arista-mcp.toml
 *.log
+
+# Claude Code per-user overrides stay out of git
+.claude/settings.local.json
+.claude/.last-test-result

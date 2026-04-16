@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+
+  "permissions": {
+    "allow": [
+      "Bash(dotnet *)",
+      "Bash(podman *)",
+      "Bash(podman-compose *)",
+      "Bash(docker *)",
+      "Bash(docker-compose *)",
+      "Bash(docker compose *)",
+      "Bash(psql *)",
+      "Bash(pg_isready *)",
+      "Bash(pg_dump *)",
+      "Bash(uv run *)",
+      "Bash(uv sync *)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git show*)",
+      "Bash(git branch*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git tag *)",
+      "Bash(git stash*)",
+      "Bash(git restore*)",
+      "Bash(curl https://huggingface.co/*)",
+      "Bash(curl https://github.com/*)",
+      "Bash(wget https://huggingface.co/*)",
+      "Bash(wget https://github.com/*)",
+      "Bash(jq *)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -*)",
+      "Bash(podman rm *)",
+      "Bash(podman volume rm *)",
+      "Bash(podman system prune*)",
+      "Bash(docker system prune*)",
+      "Bash(rm -rf *)"
+    ]
+  },
+
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_response.filePath // .tool_input.file_path // empty' | { read -r f; [[ -n \"$f\" && \"$f\" == *.cs ]] && dotnet format --include \"$f\" --verbosity quiet 2>/dev/null; :; }",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd=$(jq -r '.tool_input.command // empty'); if [[ \"$cmd\" == *'arista-mcp ingest'* || \"$cmd\" == *'arista-mcp serve'* || \"$cmd\" == *'arista-mcp reindex'* ]]; then if ! pg_isready -h localhost -p 5434 -U arista -d arista -t 2 >/dev/null 2>&1; then printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"postgres not reachable on localhost:5434. Start it: podman-compose -f docker/compose.yaml up -d postgres\"}}'; exit 0; fi; fi; printf '%s\\n' '{}'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel 2>/dev/null || echo .)\" 2>/dev/null; { echo '=== arista-mcp session ==='; echo; echo '# git'; git status --short 2>/dev/null | head -10 || echo '  (not a git repo)'; echo; echo '# containers'; podman ps --filter name=arista-mcp --format 'table {{.Names}}\\t{{.Status}}' 2>/dev/null | head -5 || echo '  (podman not running)'; echo; echo '# last ingest'; psql -h localhost -p 5434 -U arista arista -tA -c \"SELECT to_char(finished_at,'YYYY-MM-DD HH24:MI') || ' status=' || status || ' docs=' || docs_upserted || ' chunks=' || chunks_upserted FROM ingest_runs ORDER BY started_at DESC LIMIT 1\" 2>/dev/null || echo '  (db not ready)'; } 2>&1 | jq -Rs '{systemMessage: .}'",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
