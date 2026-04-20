@@ -10,6 +10,7 @@ internal static class Program
         var root = new RootCommand("arista-mcp — MCP server + CLI for Arista documentation search")
         {
             IngestCommand.Build(),
+            ServeCommand.Build(),
         };
 
         return root.Parse(args).InvokeAsync();
