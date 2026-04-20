@@ -85,3 +85,26 @@ Sprint N+1 until Sprint N's gate passes and `git tag sprint-N-review` exists.
 - `System.CommandLine 2.0.6` uses `new Option<T>(name)`, collection-init subcommands,
   `SetAction((ParseResult pr, CancellationToken ct) => ...)`. The beta4 `SetHandler`
   positional-binding API is gone.
+
+## Sprint 3 additions (retrieval + MCP server)
+
+- `QueryExpander` annotates 20+ Arista acronyms on first occurrence (EVPN/VXLAN/MLAG/
+  BGP/OSPF/LACP/sFlow/SR/MSS/AVD/LANZ/VARP/VRRP/VRF/QoS/ACL/TCAM/EOS/CVP/DMF). Dict is
+  case-insensitive, casing is preserved, each acronym expands at most once per query.
+- `HybridRetriever` (in `AristaMcp.Server.Retrieval`) runs dense (`embedding <=> $1`) +
+  sparse (`bm25v <&> to_bm25query(...)`) SQL in parallel, fuses via RRF k=60, reranks
+  top-N, returns `SearchResponse` + `SearchDiagnostics` with per-stage timings.
+- `IReranker` → `NoopReranker` ships now; `OnnxReranker` against bge-reranker-base is
+  deferred (adds 278 MB model + needs cross-encoder `[query, doc]` pair tokenization
+  which Microsoft.ML.Tokenizers 2.0.0 doesn't expose cleanly).
+- Five MCP tools (`search_docs`, `lookup_section`, `list_documents`, `get_document`,
+  `get_status`) live in `AristaMcp.Server.Tools` as `[McpServerToolType]` classes with
+  constructor DI.
+- `ServerHosting.AddAristaMcpServices(settings)` is the single source of truth for DI
+  lifetimes — used by both `StdioHost` (console, logs to stderr) and `HttpHost`
+  (ASP.NET Core, `MapMcp()`, `Stateless=true`).
+- `arista-mcp serve --transport stdio|http --port 8080` launches either host. Verified
+  end-to-end: `tools/list` over Streamable HTTP returns all 5 tools with JSON schemas.
+- `vchord_bm25`'s `<&>` operator only returns rows with ≥1 matching token — zero-overlap
+  chunks never appear in the result set. Don't write tests that assume a specific fixed
+  result count from BM25; assert on top-ranked identities instead.

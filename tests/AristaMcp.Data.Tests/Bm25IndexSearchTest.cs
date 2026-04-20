@@ -89,14 +89,15 @@ public class Bm25IndexSearchTest(PgvectorFixture fx)
             results.Add((reader.GetInt32(0), reader.GetFloat(1)));
         }
 
-        results.Should().HaveCount(3);
-        // Chunks 0 ("BGP over VXLAN overlay ... EVPN") and 3 ("EVPN type-5 ... overlay networks")
-        // contain both query tokens and must rank in the top 3.
+        // The BM25 index is sparse — it only returns chunks with at least one matching token.
+        // "EVPN overlay" tokens land in chunks 0 ("BGP VXLAN overlay ... EVPN") and 3
+        // ("EVPN type-5 ... overlay networks"); the other three chunks have zero overlap
+        // with the query vocabulary and won't be returned at all.
+        results.Should().HaveCountGreaterThanOrEqualTo(2);
         var topIndices = results.Select(r => r.Idx).ToList();
         topIndices.Should().Contain(0);
         topIndices.Should().Contain(3);
 
-        // <&> returns negative BM25 score (lower = better match); both top hits should be < 0.
         results[0].Score.Should().BeLessThan(0f,
             $"best match must have negative score; got {results[0].Score.ToString(CultureInfo.InvariantCulture)}");
     }
