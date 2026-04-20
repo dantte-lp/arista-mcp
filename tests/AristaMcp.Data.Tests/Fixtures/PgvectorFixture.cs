@@ -33,13 +33,14 @@ public sealed class PgvectorFixture : IAsyncLifetime
 
         await EnsureExtensionsAsync();
 
+        // EF migrations now provision both the base schema and the bm25v column/trigger/
+        // index (AddBm25Column migration) — no more manual SQL files to chase.
         var opt = new DbContextOptionsBuilder<AristaDbContext>()
             .UseNpgsql(DataSource, o => o.UseVector())
             .Options;
         await using var ctx = new AristaDbContext(opt);
         await ctx.Database.MigrateAsync();
 
-        await EnsureBm25Async();
         await ResetAsync();
     }
 
@@ -90,32 +91,6 @@ public sealed class PgvectorFixture : IAsyncLifetime
         {
             _ = ex;
         }
-    }
-
-    private async Task EnsureBm25Async()
-    {
-        // Manually check whether bm25v column + index already exist; apply migration only if not.
-        await using var conn = await DataSource.OpenConnectionAsync();
-        await using (var probe = conn.CreateCommand())
-        {
-            probe.CommandText = """
-                SELECT EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_name = 'chunks' AND column_name = 'bm25v'
-                );
-                """;
-            var exists = (bool?)await probe.ExecuteScalarAsync() ?? false;
-            if (exists)
-            {
-                return;
-            }
-        }
-
-        var path = ResolveRepoFile("src/AristaMcp.Data/Migrations/Manual/001_bm25v_column.sql");
-        var sql = await File.ReadAllTextAsync(path);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        await cmd.ExecuteNonQueryAsync();
     }
 
     private static string ResolveRepoFile(string relativePath)
