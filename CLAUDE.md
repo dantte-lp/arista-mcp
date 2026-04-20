@@ -108,3 +108,31 @@ Sprint N+1 until Sprint N's gate passes and `git tag sprint-N-review` exists.
 - `vchord_bm25`'s `<&>` operator only returns rows with ≥1 matching token — zero-overlap
   chunks never appear in the result set. Don't write tests that assume a specific fixed
   result count from BM25; assert on top-ranked identities instead.
+
+## Sprint 4 additions (polish + v0.1.0)
+
+- **`bm25v` provisioned by EF migration** (`20260420132646_AddBm25Column`). No more
+  `Migrations/Manual/` file to remember — `dotnet ef database update` does everything.
+- **`OnnxReranker`** — cross-encoder/ms-marco-MiniLM-L6-v2 (BERT-base-uncased,
+  shares Arctic Embed's vocab). Pair-tokenizes `[CLS] query [SEP] doc [SEP]` with
+  `token_type_ids = 0` on segment 0 and `1` on segment 1. `ServerHosting.BuildReranker`
+  auto-detects `models/reranker/` and falls back to `NoopReranker` when absent.
+- **`HybridRetriever` invariants** (post-review):
+  - `DenseSimilarity = 1 - cosine_distance` (conventional similarity, not distance).
+  - `Bm25Score = -sparse_distance` (sign-flipped to "higher = better"). Do not assert
+    specific score values in tests; assert on sign/magnitude bounds.
+  - Co-hit chunks carry BOTH `DenseDistance` and `SparseDistance` through the fusion
+    accumulator. `FusedCandidate` is the only place that enforces this — don't split it.
+  - Dense/sparse SQL timings are measured inside each `Run*Async`; do not add a second
+    outer `Stopwatch` or the two will drift.
+- **`TimeProvider` everywhere** — repositories inject `TimeProvider`; DI registers
+  `TimeProvider.System`. Never call `DateTimeOffset.UtcNow` directly from new code.
+- **C# 14 / .NET 10 idioms in use:** `FrozenDictionary` (`QueryExpander.Synonyms`),
+  `CollectionsMarshal.GetValueRefOrAddDefault` (RRF accumulator),
+  `TensorPrimitives.Norm`/`Divide` (`OnnxEmbedder` L2-normalize), collection expressions
+  `[.. x.Select(...)]` for `Half[]` conversions.
+- **Benchmark harness** — `arista-mcp bench --queries tests/fixtures/bench-queries.json
+  --limit 10` runs the curated 30-query set end-to-end; exit code 1 if top-10 hit rate
+  < 80%. Uses the same embedder + reranker + retriever wiring as `serve`.
+- **Known non-fix:** `AsyncFixer 1.6.0 → 2.1.0` is a major bump; not taken in v0.1.0.
+  EF Core 10.x bump is blocked by `Pgvector.EntityFrameworkCore 0.3.0` targeting EF 9.x.
