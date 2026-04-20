@@ -33,6 +33,7 @@
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.4.0" />
     <PackageVersion Include="FluentAssertions" Version="8.9.0" />
     <PackageVersion Include="NSubstitute" Version="5.3.0" />
+    <PackageVersion Include="Xunit.SkippableFact" Version="1.5.61" />
     <!-- Transitive pin: EF Core Design pulls an old System.Security.Cryptography.Xml with CVEs; force patched. -->
     <PackageVersion Include="System.Security.Cryptography.Xml" Version="9.0.15" />
   </ItemGroup>
