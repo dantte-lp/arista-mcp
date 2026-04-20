@@ -6,6 +6,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/AristaMcp.Data/AristaMcp.Data.csproj" />
     <ProjectReference Include="../../src/AristaMcp.Cli/AristaMcp.Cli.csproj" />
+    <ProjectReference Include="../../src/AristaMcp.Server/AristaMcp.Server.csproj" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
