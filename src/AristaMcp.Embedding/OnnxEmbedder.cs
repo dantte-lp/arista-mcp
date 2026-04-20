@@ -1,3 +1,4 @@
+using System.Numerics.Tensors;
 using Microsoft.ML.OnnxRuntime;
 
 namespace AristaMcp.Embedding;
@@ -98,25 +99,16 @@ public sealed class OnnxEmbedder : IEmbedder
 
     // Defensive re-normalize — the export should already emit unit vectors, but this
     // protects retrieval quality if a future export forgets the normalize layer.
+    // TensorPrimitives.Norm + Divide are SIMD-vectorized on .NET 10.
     private static float[] ExtractAndNormalize(ReadOnlySpan<float> sentence, int batchIdx)
     {
         var vec = new float[HiddenSize];
-        var src = sentence.Slice(batchIdx * HiddenSize, HiddenSize);
-        src.CopyTo(vec);
+        sentence.Slice(batchIdx * HiddenSize, HiddenSize).CopyTo(vec);
 
-        double sq = 0;
-        for (var d = 0; d < HiddenSize; d++)
-        {
-            sq += vec[d] * vec[d];
-        }
-
-        var norm = (float)Math.Sqrt(sq);
+        var norm = TensorPrimitives.Norm<float>(vec);
         if (norm > 1e-9f)
         {
-            for (var d = 0; d < HiddenSize; d++)
-            {
-                vec[d] /= norm;
-            }
+            TensorPrimitives.Divide(vec, norm, vec);
         }
 
         return vec;

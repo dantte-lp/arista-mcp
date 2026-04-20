@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -9,9 +10,9 @@ namespace AristaMcp.Core.Retrieval;
 // is expanded at most once per query so repeated mentions don't bloat the embedding.
 public static partial class QueryExpander
 {
-    // Order matters only for documentation — matching is per-word on any occurrence.
-    private static readonly Dictionary<string, string> Synonyms =
-        new(StringComparer.OrdinalIgnoreCase)
+    // Frozen for fast lookup on the query hot path — read-only, built once at startup.
+    private static readonly FrozenDictionary<string, string> Synonyms =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["EVPN"] = "Ethernet VPN",
             ["VXLAN"] = "Virtual Extensible LAN",
@@ -33,7 +34,7 @@ public static partial class QueryExpander
             ["QoS"] = "Quality of Service",
             ["ACL"] = "Access Control List",
             ["TCAM"] = "Ternary Content-Addressable Memory",
-        };
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     [GeneratedRegex(@"\b[\w][\w\-]*\b", RegexOptions.ExplicitCapture)]
     private static partial Regex WordRegex();

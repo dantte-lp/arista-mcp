@@ -69,12 +69,7 @@ public class ChunkRepository(NpgsqlDataSource dataSource, AristaDbContext db) : 
 
             await writer.WriteAsync(c.TokenCount, NpgsqlDbType.Integer, ct).ConfigureAwait(false);
 
-            var halfArr = new Half[c.Embedding.Length];
-            for (var i = 0; i < c.Embedding.Length; i++)
-            {
-                halfArr[i] = (Half)c.Embedding[i];
-            }
-
+            Half[] halfArr = [.. c.Embedding.Select(static f => (Half)f)];
             await writer.WriteAsync(new HalfVector(halfArr), ct).ConfigureAwait(false);
             await writer.WriteAsync(c.EmbeddingModel, NpgsqlDbType.Text, ct).ConfigureAwait(false);
         }
