@@ -22,19 +22,35 @@ public static class BenchCommand
         };
         var limit = new Option<int>("--limit") { Description = "Top-K per query (default 10)", DefaultValueFactory = _ => 10 };
         var models = new Option<DirectoryInfo>("--models") { Description = "Models directory override" };
+        var history = new Option<FileInfo>("--history")
+        {
+            Description = "Append a JSONL row per run to this path (date, counts, p50/p95/avg)",
+        };
+        var label = new Option<string>("--label")
+        {
+            Description = "Free-form label for the history row (e.g. 'v0.1.1-baseline')",
+        };
 
         var cmd = new Command("bench", "Run a retrieval benchmark against the ingested corpus")
         {
             queries,
             limit,
             models,
+            history,
+            label,
         };
 
         cmd.SetAction(async (ParseResult pr, CancellationToken ct) =>
         {
             var queriesPath = ResolveQueriesPath(pr.GetValue(queries));
             var topK = Math.Clamp(pr.GetValue(limit), 1, 50);
-            return await RunAsync(queriesPath, topK, pr.GetValue(models), ct).ConfigureAwait(false);
+            return await RunAsync(
+                queriesPath,
+                topK,
+                pr.GetValue(models),
+                pr.GetValue(history),
+                pr.GetValue(label),
+                ct).ConfigureAwait(false);
         });
 
         return cmd;
@@ -56,6 +72,8 @@ public static class BenchCommand
         string queriesPath,
         int topK,
         DirectoryInfo? modelsOverride,
+        FileInfo? historyPath,
+        string? label,
         CancellationToken ct)
     {
         var console = AnsiConsole.Console;
@@ -118,8 +136,45 @@ public static class BenchCommand
         RenderTable(console, rows, topK);
         RenderSummary(console, rows);
 
+        if (historyPath is not null)
+        {
+            await AppendHistoryAsync(historyPath.FullName, rows, topK, label, ct).ConfigureAwait(false);
+            console.MarkupLine($"  [grey]history → {Markup.Escape(historyPath.FullName)}[/]");
+        }
+
         var hitRate = rows.Count == 0 ? 0.0 : rows.Count(r => r.Top10) * 100.0 / rows.Count;
         return hitRate >= 80 ? 0 : 1;
+    }
+
+    private static Task AppendHistoryAsync(
+        string path,
+        List<BenchRow> rows,
+        int topK,
+        string? label,
+        CancellationToken ct)
+    {
+        var latencies = rows.Select(r => r.ElapsedMs).OrderBy(x => x).ToArray();
+        var entry = new
+        {
+            date = DateTimeOffset.UtcNow,
+            label,
+            query_count = rows.Count,
+            top_k = topK,
+            top1_hit_rate = rows.Count == 0 ? 0.0 : Math.Round(rows.Count(r => r.Top1) * 100.0 / rows.Count, 2),
+            topk_hit_rate = rows.Count == 0 ? 0.0 : Math.Round(rows.Count(r => r.Top10) * 100.0 / rows.Count, 2),
+            latency_p50_ms = latencies.Length > 0 ? Math.Round(latencies[latencies.Length / 2], 1) : 0,
+            latency_p95_ms = latencies.Length > 0 ? Math.Round(latencies[(int)Math.Min(latencies.Length - 1, Math.Ceiling(latencies.Length * 0.95) - 1)], 1) : 0,
+            latency_avg_ms = latencies.Length > 0 ? Math.Round(latencies.Average(), 1) : 0,
+        };
+
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+
+        var line = JsonSerializer.Serialize(entry) + Environment.NewLine;
+        return File.AppendAllTextAsync(path, line, ct);
     }
 
     private static IReranker BuildReranker(string modelsDir, bool gpu)
