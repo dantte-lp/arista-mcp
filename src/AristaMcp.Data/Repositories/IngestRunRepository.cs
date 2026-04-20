@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AristaMcp.Data.Repositories;
 
-public class IngestRunRepository(AristaDbContext db, TimeProvider clock) : IIngestRunRepository
+public sealed class IngestRunRepository(AristaDbContext db, TimeProvider clock) : IIngestRunRepository
 {
     public async Task<IngestRunEntity> StartAsync(string? catalogSha256, CancellationToken ct)
     {

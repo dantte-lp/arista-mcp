@@ -4,7 +4,7 @@ using Pgvector;
 namespace AristaMcp.Data.Entities;
 
 [Table("chunks")]
-public class ChunkEntity
+public sealed class ChunkEntity
 {
     [Column("id")] public long Id { get; set; }
     [Column("document_id")] public string DocumentId { get; set; } = "";

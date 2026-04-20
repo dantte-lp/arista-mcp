@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AristaMcp.Data.Repositories;
 
-public class DocumentRepository(AristaDbContext db, TimeProvider clock) : IDocumentRepository
+public sealed class DocumentRepository(AristaDbContext db, TimeProvider clock) : IDocumentRepository
 {
     public async Task UpsertAsync(AristaDocument doc, CancellationToken ct)
     {

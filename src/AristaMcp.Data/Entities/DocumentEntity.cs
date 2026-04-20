@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace AristaMcp.Data.Entities;
 
 [Table("documents")]
-public class DocumentEntity
+public sealed class DocumentEntity
 {
     [Column("id")] public string Id { get; set; } = "";
     [Column("url")] public string Url { get; set; } = "";

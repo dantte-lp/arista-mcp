@@ -28,8 +28,6 @@ public static partial class DocumentLoader
         ArgumentException.ThrowIfNullOrEmpty(catalogBaseDir);
 
         var mdFull = Path.Combine(catalogBaseDir, NormalizePath(entry.MdPath));
-        var jsonFull = Path.Combine(catalogBaseDir, NormalizePath(entry.JsonPath));
-
         if (!File.Exists(mdFull))
         {
             throw new FileNotFoundException($"MD file missing for doc {entry.Id}", mdFull);
@@ -61,8 +59,6 @@ public static partial class DocumentLoader
             DownloadedAt = entry.DownloadedAt,
             ConvertedAt = entry.ConvertedAt,
         };
-
-        _ = jsonFull; // reserved for future enrichment (TOC lookup, image names)
 
         return new LoadedDocument
         {

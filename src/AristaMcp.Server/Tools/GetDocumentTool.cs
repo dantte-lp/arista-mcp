@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json;
 using AristaMcp.Data;
 using Microsoft.EntityFrameworkCore;
 using ModelContextProtocol.Server;
@@ -29,6 +30,8 @@ public sealed class GetDocumentTool(AristaDbContext db)
             .CountAsync(c => c.DocumentId == documentId, ct)
             .ConfigureAwait(false);
 
+        var tags = JsonSerializer.Deserialize<string[]>(doc.TagsJson) ?? [];
+
         return new
         {
             found = true,
@@ -39,7 +42,7 @@ public sealed class GetDocumentTool(AristaDbContext db)
             category = doc.Category,
             product = doc.Product,
             version = doc.Version,
-            tags = doc.TagsJson,
+            tags,
             pages = doc.Pages,
             size_bytes = doc.SizeBytes,
             md_path = doc.MdPath,

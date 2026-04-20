@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace AristaMcp.Data.Entities;
 
 [Table("ingest_runs")]
-public class IngestRunEntity
+public sealed class IngestRunEntity
 {
     [Column("id")] public long Id { get; set; }
     [Column("started_at")] public DateTimeOffset StartedAt { get; set; }

@@ -6,7 +6,7 @@ using Pgvector;
 
 namespace AristaMcp.Data.Repositories;
 
-public class ChunkRepository(NpgsqlDataSource dataSource, AristaDbContext db) : IChunkRepository
+public sealed class ChunkRepository(NpgsqlDataSource dataSource, AristaDbContext db) : IChunkRepository
 {
     public async Task<int> BulkInsertAsync(IReadOnlyList<AristaChunk> chunks, CancellationToken ct)
     {
