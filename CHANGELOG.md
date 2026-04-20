@@ -3,6 +3,54 @@
 All notable changes to arista-mcp are documented here. Format follows
 [keep-a-changelog](https://keepachangelog.com); dates use ISO-8601.
 
+## [v0.1.1] — 2026-04-20
+
+Sprint 5 — post-v0.1 hygiene + JSON enrichment + E2E coverage.
+
+### Added
+
+- **Page numbers in `search_docs` output.** `DocumentLoader` now reads the per-doc
+  `{slug}.json` alongside the MD file and stamps `page_start`/`page_end` onto each
+  section by pairing MD headings against JSON sections in order, keyed by
+  `(level, cleaned_title)`. Heading normaliser ports `arista-docs.enrich._clean_heading`
+  (strips `**bold**`, `*italic*`, `_underscore_`, inline HTML, collapses whitespace).
+  Missing/corrupt JSON falls back to MD-only (null pages).
+- **`FakeTimeProvider` in tests** — `Microsoft.Extensions.TimeProvider.Testing 10.5.0`.
+  Two regression tests on `IngestRunRepository` assert exact-offset `FinishedAt -
+  StartedAt` across `Advance(5m)` and multiple accumulating advances.
+- **`bench --history` / `--label` flags.** Appends one JSONL row per run (date, label,
+  query_count, top_k, top1 & topk hit rates, p50/p95/avg latency). First baseline row:
+  `v0.1.1-manual-category-baseline` on 225 docs / 7347 chunks: top-1 66.7%, top-10
+  80.0%, p50 1638 ms, p95 2127 ms (CPU embedder, Windows/Podman).
+- **E2E test surface** — `tests/AristaMcp.E2E/`:
+  - `StdioTransportE2ETest` spawns `arista-mcp serve --transport stdio`, does raw
+    JSON-RPC initialize + `tools/list`, asserts all 5 tools present (~540 ms).
+  - `HttpTransportE2ETest` spawns `--transport http` on ephemeral port, `HttpClient`
+    POST with SSE body parse, same assertions (~970 ms).
+  - `tests/e2e/01-fresh-deploy.sh` + `02-category-ingest.sh` — shell scenarios for
+    schema provisioning + category-slice ingest + incremental skip.
+- **GitHub Actions E2E workflow** (`.github/workflows/e2e.yml`) on ubuntu-latest with a
+  service-container postgres, NuGet + model caching, full build + unit/integration +
+  E2E. SkippableFacts gracefully skip on empty corpus.
+
+### Changed
+
+- **AsyncFixer 1.6.0 → 2.1.0.** No rule-ID renames; strictly fewer false positives on
+  `AsyncFixer02`. Zero source-level suppressions required.
+
+### Fixed
+
+- **`MissingMethodException` on direct `dotnet run`.** `Pgvector.EntityFrameworkCore
+  0.3.0` pulls `Microsoft.EntityFrameworkCore.Relational 9.0.1` transitively, which was
+  copied into the publish output while our code targeted 9.0.15 (NU1608 warning
+  promoted to a runtime failure for the CLI). Fixed with a direct
+  `Microsoft.EntityFrameworkCore.Relational 9.0.15` pin in `AristaMcp.Data`.
+
+### Quality gate
+
+48/48 tests green (21 Core + 3 Embedding + 17 Data + 2 E2E + 5 new enrichment tests
++ 2 FakeTimeProvider tests). `dotnet build` clean; all 10 projects.
+
 ## [v0.1.0] — 2026-04-20
 
 Initial release. Four waterfall sprints from spec to tag.

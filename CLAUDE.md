@@ -136,3 +136,28 @@ Sprint N+1 until Sprint N's gate passes and `git tag sprint-N-review` exists.
   < 80%. Uses the same embedder + reranker + retriever wiring as `serve`.
 - **Known non-fix:** `AsyncFixer 1.6.0 → 2.1.0` is a major bump; not taken in v0.1.0.
   EF Core 10.x bump is blocked by `Pgvector.EntityFrameworkCore 0.3.0` targeting EF 9.x.
+
+## Sprint 5 additions (v0.1.1)
+
+- **DocumentLoader now reads per-doc JSON.** Pages stamp via
+  `StampPagesFromJson(mdSections, jsonSections)` — order-preserving pair by
+  `(level, CleanHeading(title))`. `CleanHeading` mirrors Python
+  `arista-docs.enrich._clean_heading`. Don't drop the normalisation — an MD
+  `**Configuration**` won't match a JSON `Configuration` without it.
+- **FakeTimeProvider** — `Microsoft.Extensions.Time.Testing` namespace, pin
+  `10.5.0`. Inject as base `TimeProvider` (repos already did this in v0.1.0).
+  Tests: `new FakeTimeProvider(t0)` + `Advance(TimeSpan)`. Leave
+  `AutoAdvanceAmount = Zero` — silent drift bug otherwise.
+- **`bench --history <path> --label <tag>`** — append-only JSONL. Runs compare across
+  retrievals over time; CI can diff baselines. Directory auto-created.
+- **E2E test layers:**
+  - `tests/AristaMcp.E2E/` — C# tests that spawn `arista-mcp` via the `CliProcess`
+    helper. Both transports covered via raw JSON-RPC (stdio) and `HttpClient` SSE
+    parse (HTTP). `SkippableFact` guards skip on missing embedder or empty chunks.
+  - `tests/e2e/*.sh` — shell scenarios for schema + ingest; `set -euo pipefail`, use
+    `podman exec` for `psql` so host-side psql isn't required.
+- **EF.Relational 9.0.15 direct pin** in `AristaMcp.Data.csproj` — otherwise
+  `Pgvector.EFCore 0.3.0` wins the transitive battle with 9.0.1 and `dotnet run`
+  throws `MissingMethodException` at first `DbSet<>` access.
+- **AsyncFixer 2.1.0** active; no new warnings surfaced on the existing codebase
+  (zero suppressions anywhere in `src/`).
