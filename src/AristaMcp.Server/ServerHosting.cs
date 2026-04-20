@@ -35,7 +35,7 @@ public static class ServerHosting
         });
 
         services.AddSingleton<IEmbedder>(_ => BuildEmbedder(settings));
-        services.AddSingleton<IReranker>(_ => new NoopReranker());
+        services.AddSingleton<IReranker>(_ => BuildReranker(settings));
 
         services.AddScoped<IDocumentRepository, DocumentRepository>();
         services.AddScoped<IChunkRepository>(sp => new ChunkRepository(
@@ -49,6 +49,25 @@ public static class ServerHosting
             sp.GetRequiredService<NpgsqlDataSource>()));
 
         return services;
+    }
+
+    // Swap to OnnxReranker when models/reranker/ is populated; otherwise fall back to
+    // the passthrough. This keeps `arista-mcp serve` usable even without a rerank model.
+    private static IReranker BuildReranker(AristaMcpSettings settings)
+    {
+        var modelPath = Path.Combine(settings.ModelsDir, "reranker", "model.onnx");
+        var vocabPath = Path.Combine(settings.ModelsDir, "reranker", "vocab.txt");
+        if (!File.Exists(modelPath) || !File.Exists(vocabPath))
+        {
+            return new NoopReranker();
+        }
+
+        return new OnnxReranker(new RerankerOptions
+        {
+            ModelPath = modelPath,
+            VocabPath = vocabPath,
+            Gpu = settings.Gpu,
+        });
     }
 
     private static OnnxEmbedder BuildEmbedder(AristaMcpSettings settings)

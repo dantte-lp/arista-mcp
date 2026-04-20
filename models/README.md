@@ -10,14 +10,12 @@ Expected layout after fetch:
       embedder/
         model.onnx        (~436 MB, fp32 — snowflake-arctic-embed-m-v1.5)
         vocab.txt         (~232 KB, WordPiece)
+      reranker/
+        model.onnx        (~91 MB — cross-encoder/ms-marco-MiniLM-L6-v2)
+        vocab.txt         (~232 KB, WordPiece — same bert-base-uncased tokens)
 
-Integration tests (OnnxEmbedderTests, end-to-end ingest) skip if
-`models/embedder/model.onnx` is absent.
+Integration tests (OnnxEmbedderTests, OnnxRerankerTests, end-to-end ingest)
+skip if the corresponding model file is absent.
 
-To use the fp16 variant instead (~218 MB, small quality hit):
-
-    pwsh scripts/fetch-models.ps1
-    # then swap the URL in fetch-models.ps1 to /onnx/model_fp16.onnx
-
-For the eventual reranker (Sprint 3), drop `bge-reranker-base/model.onnx +
-vocab.txt` under `models/reranker/`.
+To use the fp16 embedder variant instead (~218 MB, small quality hit) swap
+the URL in `fetch-models.ps1` to `/onnx/model_fp16.onnx`.

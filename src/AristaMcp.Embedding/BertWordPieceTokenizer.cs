@@ -17,6 +17,11 @@ public sealed class BertWordPieceTokenizer
 
     public int SeparatorTokenId => _tok.SeparatorTokenId;
 
+    // Raw tokenization without special tokens — caller assembles the sequence (used by
+    // the cross-encoder reranker which stitches [CLS] query [SEP] doc [SEP] itself).
+    public int[] EncodeBare(string text) =>
+        [.. _tok.EncodeToIds(text, addSpecialTokens: false, considerPreTokenization: true)];
+
     public BertWordPieceTokenizer(string vocabPath)
     {
         using var fs = File.OpenRead(vocabPath);

@@ -19,6 +19,16 @@ $files = @(
         Url = 'https://huggingface.co/Snowflake/snowflake-arctic-embed-m-v1.5/resolve/main/vocab.txt'
         Dest = Join-Path $ModelsRoot 'embedder\vocab.txt'
         MinBytes = 100KB
+    },
+    @{
+        Url = 'https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/resolve/main/onnx/model.onnx'
+        Dest = Join-Path $ModelsRoot 'reranker\model.onnx'
+        MinBytes = 80MB
+    },
+    @{
+        Url = 'https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/resolve/main/vocab.txt'
+        Dest = Join-Path $ModelsRoot 'reranker\vocab.txt'
+        MinBytes = 100KB
     }
 )
 
