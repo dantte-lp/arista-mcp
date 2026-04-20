@@ -15,5 +15,7 @@
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Xunit.SkippableFact" />
+    <PackageReference Include="ModelContextProtocol" />
   </ItemGroup>
 </Project>
