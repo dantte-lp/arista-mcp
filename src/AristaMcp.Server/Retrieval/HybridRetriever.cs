@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using AristaMcp.Core.Models;
 using AristaMcp.Core.Retrieval;
 using AristaMcp.Embedding;
@@ -14,7 +15,8 @@ namespace AristaMcp.Server.Retrieval;
 //   3. In parallel:
 //        - dense: ORDER BY embedding <=> $1::halfvec (pgvector cosine)
 //        - sparse: ORDER BY bm25v <&> to_bm25query(idx, tokenize(q, 'chunks_tokenizer')::bm25vector)
-//   4. Reciprocal Rank Fusion with k=60 (RrfK)
+//   4. Reciprocal Rank Fusion with k=60 (RrfK) — tracks BOTH distances per co-hit so
+//      diagnostics report accurate DenseSimilarity + Bm25Score even for fused chunks.
 //   5. Rerank top-N via IReranker
 //   6. Emit diagnostics alongside results
 public sealed class HybridRetriever(
@@ -36,13 +38,14 @@ public sealed class HybridRetriever(
         var embedSw = Stopwatch.StartNew();
         var qVecs = await embedder.EmbedAsync([expansion.Expanded], isQuery: true, ct).ConfigureAwait(false);
         embedSw.Stop();
-        var qVec = new HalfVector(qVecs[0].Select(f => (Half)f).ToArray());
+        Half[] halfArr = [.. qVecs[0].Select(static f => (Half)f)];
+        var qVec = new HalfVector(halfArr);
 
         var denseTask = RunDenseAsync(qVec, options, ct);
         var sparseTask = RunSparseAsync(expansion.Expanded, options, ct);
         await Task.WhenAll(denseTask, sparseTask).ConfigureAwait(false);
-        var denseRows = denseTask.Result;
-        var sparseRows = sparseTask.Result;
+        var (denseRows, denseMs) = denseTask.Result;
+        var (sparseRows, sparseMs) = sparseTask.Result;
 
         var rrfSw = Stopwatch.StartNew();
         var fused = ReciprocalRankFusion(denseRows, sparseRows, options.RrfK);
@@ -69,8 +72,8 @@ public sealed class HybridRetriever(
             AfterRrf: fused.Count,
             AfterRerank: results.Count,
             EmbedMs: embedSw.Elapsed.TotalMilliseconds,
-            DenseQueryMs: 0,
-            SparseQueryMs: 0,
+            DenseQueryMs: denseMs,
+            SparseQueryMs: sparseMs,
             RrfMs: rrfSw.Elapsed.TotalMilliseconds,
             RerankMs: rerankSw.Elapsed.TotalMilliseconds,
             TotalMs: total.Elapsed.TotalMilliseconds);
@@ -78,7 +81,7 @@ public sealed class HybridRetriever(
         return new SearchResponse(results, diag);
     }
 
-    private async Task<List<CandidateRow>> RunDenseAsync(
+    private async Task<(List<CandidateRow> Rows, double ElapsedMs)> RunDenseAsync(
         HalfVector qVec,
         RetrievalOptions options,
         CancellationToken ct)
@@ -96,6 +99,7 @@ public sealed class HybridRetriever(
             LIMIT $4;
             """;
 
+        var sw = Stopwatch.StartNew();
         await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
@@ -104,10 +108,12 @@ public sealed class HybridRetriever(
         cmd.Parameters.Add(new NpgsqlParameter<string?> { TypedValue = options.Product });
         cmd.Parameters.Add(new NpgsqlParameter<int> { TypedValue = options.CandidatePoolSize });
 
-        return await ReadRowsAsync(cmd, scoreSign: -1, ct).ConfigureAwait(false);
+        var rows = await ReadRowsAsync(cmd, ct).ConfigureAwait(false);
+        sw.Stop();
+        return (rows, sw.Elapsed.TotalMilliseconds);
     }
 
-    private async Task<List<CandidateRow>> RunSparseAsync(
+    private async Task<(List<CandidateRow> Rows, double ElapsedMs)> RunSparseAsync(
         string query,
         RetrievalOptions options,
         CancellationToken ct)
@@ -129,6 +135,7 @@ public sealed class HybridRetriever(
             LIMIT $4;
             """;
 
+        var sw = Stopwatch.StartNew();
         await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
@@ -137,19 +144,17 @@ public sealed class HybridRetriever(
         cmd.Parameters.Add(new NpgsqlParameter<string?> { TypedValue = options.Product });
         cmd.Parameters.Add(new NpgsqlParameter<int> { TypedValue = options.CandidatePoolSize });
 
-        return await ReadRowsAsync(cmd, scoreSign: +1, ct).ConfigureAwait(false);
+        var rows = await ReadRowsAsync(cmd, ct).ConfigureAwait(false);
+        sw.Stop();
+        return (rows, sw.Elapsed.TotalMilliseconds);
     }
 
-    private static async Task<List<CandidateRow>> ReadRowsAsync(
-        NpgsqlCommand cmd,
-        int scoreSign,
-        CancellationToken ct)
+    private static async Task<List<CandidateRow>> ReadRowsAsync(NpgsqlCommand cmd, CancellationToken ct)
     {
         var rows = new List<CandidateRow>();
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            var distance = reader.GetFloat(14);
             rows.Add(new CandidateRow(
                 ChunkId: reader.GetInt64(0),
                 DocumentId: reader.GetString(1),
@@ -165,10 +170,7 @@ public sealed class HybridRetriever(
                 Category: reader.GetString(11),
                 Product: reader.IsDBNull(12) ? null : reader.GetString(12),
                 Version: reader.IsDBNull(13) ? null : reader.GetString(13),
-                Distance: distance,
-                // <=> returns [0..2] where 0 is perfect match; we want higher=better.
-                // <&> returns negative BM25; we negate to get higher=better.
-                RawScore: scoreSign * distance));
+                Distance: reader.GetFloat(14)));
         }
 
         return rows;
@@ -179,32 +181,31 @@ public sealed class HybridRetriever(
         List<CandidateRow> sparse,
         int k)
     {
-        var scores = new Dictionary<long, (float Rrf, CandidateRow Row, int? DenseRank, int? SparseRank)>();
+        var scores = new Dictionary<long, Accumulator>(dense.Count + sparse.Count);
 
         for (var i = 0; i < dense.Count; i++)
         {
             var row = dense[i];
             var rrf = 1f / (k + i + 1);
-            scores[row.ChunkId] = (rrf, row, i + 1, null);
+            ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(scores, row.ChunkId, out var existed);
+            slot = existed
+                ? slot with { Rrf = slot.Rrf + rrf, DenseRank = i + 1, DenseDistance = row.Distance }
+                : new Accumulator(rrf, row, i + 1, null, row.Distance, null);
         }
 
         for (var i = 0; i < sparse.Count; i++)
         {
             var row = sparse[i];
             var rrf = 1f / (k + i + 1);
-            if (scores.TryGetValue(row.ChunkId, out var existing))
-            {
-                scores[row.ChunkId] = (existing.Rrf + rrf, existing.Row, existing.DenseRank, i + 1);
-            }
-            else
-            {
-                scores[row.ChunkId] = (rrf, row, null, i + 1);
-            }
+            ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(scores, row.ChunkId, out var existed);
+            slot = existed
+                ? slot with { Rrf = slot.Rrf + rrf, SparseRank = i + 1, SparseDistance = row.Distance }
+                : new Accumulator(rrf, row, null, i + 1, null, row.Distance);
         }
 
         return [.. scores.Values
             .OrderByDescending(x => x.Rrf)
-            .Select(x => new FusedCandidate(x.Row, x.Rrf, x.DenseRank, x.SparseRank))];
+            .Select(x => new FusedCandidate(x.Row, x.Rrf, x.DenseRank, x.SparseRank, x.DenseDistance, x.SparseDistance))];
     }
 
     private static ChunkResult Build(FusedCandidate f, Dictionary<long, float> rerankScore) =>
@@ -222,8 +223,11 @@ public sealed class HybridRetriever(
             PageEnd: f.Row.PageEnd,
             RawContent: f.Row.RawContent,
             Score: rerankScore.TryGetValue(f.Row.ChunkId, out var rs) ? rs : f.RrfScore,
-            DenseSimilarity: f.DenseRank is null ? null : f.Row.RawScore,
-            Bm25Score: f.SparseRank is null ? null : -f.Row.Distance,
+            // pgvector's <=> cosine distance ∈ [0, 2]; similarity = 1 - distance ∈ [-1, 1].
+            DenseSimilarity: f.DenseDistance is null ? null : 1f - f.DenseDistance.Value,
+            // vchord_bm25's <&> returns the negative BM25 score; flip sign so callers
+            // see a conventional "higher = more relevant" value.
+            Bm25Score: f.SparseDistance is null ? null : -f.SparseDistance.Value,
             RrfScore: f.RrfScore,
             RerankScore: rerankScore.TryGetValue(f.Row.ChunkId, out var rs2) ? rs2 : null);
 
@@ -242,12 +246,21 @@ public sealed class HybridRetriever(
         string Category,
         string? Product,
         string? Version,
-        float Distance,
-        float RawScore);
+        float Distance);
 
     private sealed record FusedCandidate(
         CandidateRow Row,
         float RrfScore,
         int? DenseRank,
-        int? SparseRank);
+        int? SparseRank,
+        float? DenseDistance,
+        float? SparseDistance);
+
+    private record struct Accumulator(
+        float Rrf,
+        CandidateRow Row,
+        int? DenseRank,
+        int? SparseRank,
+        float? DenseDistance,
+        float? SparseDistance);
 }
