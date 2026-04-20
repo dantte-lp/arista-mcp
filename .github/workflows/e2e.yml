@@ -1,0 +1,112 @@
+name: E2E
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: stdio + HTTP transport smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: tensorchord/vchord-suite:pg18-latest
+        env:
+          POSTGRES_DB: arista
+          POSTGRES_USER: arista
+          POSTGRES_PASSWORD: arista
+          POSTGRES_INITDB_ARGS: --data-checksums --encoding=UTF-8
+        ports:
+          - 5434:5432
+        options: >-
+          --name arista-mcp-postgres
+          --health-cmd "pg_isready -U arista -d arista"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 15
+          -c shared_preload_libraries=vector,vchord,vchord_bm25,pg_tokenizer
+
+    env:
+      ARISTA_MCP__ConnectionString: "Host=localhost;Port=5434;Database=arista;Username=arista;Password=arista"
+      ARISTA_MCP_TEST_CS: "Host=localhost;Port=5434;Database=arista;Username=arista;Password=arista"
+      PGHOST: localhost
+      PGPORT: "5434"
+      PGUSER: arista
+      PGPASSWORD: arista
+      PGDATABASE: arista
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Run docker/init.sql
+        run: |
+          psql -h localhost -p 5434 -U arista -d arista -f docker/init.sql
+        env:
+          PGPASSWORD: arista
+
+      - name: Cache embedder model
+        id: embedder-cache
+        uses: actions/cache@v4
+        with:
+          path: models/embedder
+          key: embedder-snowflake-arctic-embed-m-v1.5
+
+      - name: Fetch embedder model (if cache miss)
+        if: steps.embedder-cache.outputs.cache-hit != 'true'
+        run: pwsh scripts/fetch-models.ps1
+        shell: bash
+
+      - name: Install dotnet-ef
+        run: dotnet tool install --global dotnet-ef --version 9.0.15
+
+      - name: Apply EF migrations
+        run: |
+          dotnet ef database update \
+            --project src/AristaMcp.Data \
+            --startup-project src/AristaMcp.Data
+
+      - name: Build solution
+        run: dotnet build arista-mcp.slnx --no-restore
+
+      - name: Run unit + integration tests
+        run: dotnet test arista-mcp.slnx --no-build --filter "FullyQualifiedName!~E2E"
+
+      - name: Seed a tiny ingest (campus category)
+        run: |
+          dotnet run --project src/AristaMcp.Cli --no-build -- \
+            ingest --catalog arista-docs-fixture/catalog.json --category campus --force --verbose || true
+        continue-on-error: true
+
+      - name: Run E2E tests (stdio + HTTP)
+        run: dotnet test tests/AristaMcp.E2E --no-build
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ github.run_id }}
+          path: |
+            **/TestResults/**
+            tests/**/*.log
+          retention-days: 7
