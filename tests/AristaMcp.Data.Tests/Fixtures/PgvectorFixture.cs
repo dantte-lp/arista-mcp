@@ -6,17 +6,22 @@ using Xunit;
 
 namespace AristaMcp.Data.Tests.Fixtures;
 
-// Shared fixture: connects to the local podman postgres (docker/compose.yaml) rather than
-// spinning a per-run Testcontainer. The postgres two-stage init races with Testcontainers'
-// wait strategy on Windows/Podman, and a single shared DB is materially faster for the
-// iteration loop. Tests clean up their own rows via ResetAsync().
+// Shared fixture. Tests get their own isolated database (`arista_test` by default) so
+// `ResetAsync()` TRUNCATEs never touch a developer's prod ingest. On first use the
+// fixture:
+//   1. connects to the maintenance `postgres` DB,
+//   2. CREATE DATABASE arista_test IF NOT EXISTS,
+//   3. connects to arista_test,
+//   4. applies docker/init.sql (extensions + english_analyzer),
+//   5. runs EF Core migrations (provisions documents/chunks/ingest_runs + bm25v trigger),
+//   6. truncates any leftover rows.
 //
-// The `ARISTA_MCP_TEST_CS` environment variable overrides the default connection string
-// (for CI or a user who binds postgres on a different host/port).
+// Override the test DB with `ARISTA_MCP_TEST_CS` when running in CI or against a
+// differently-located postgres (e.g. the WSL IP workaround).
 public sealed class PgvectorFixture : IAsyncLifetime
 {
     private const string DefaultConnectionString =
-        "Host=localhost;Port=5434;Database=arista;Username=arista;Password=arista";
+        "Host=localhost;Port=5434;Database=arista_test;Username=arista;Password=arista";
 
     public string ConnectionString { get; }
     public NpgsqlDataSource DataSource { get; private set; } = null!;
@@ -29,12 +34,11 @@ public sealed class PgvectorFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        DataSource = DataSourceFactory.Build(ConnectionString);
+        await EnsureTestDatabaseAsync();
 
+        DataSource = DataSourceFactory.Build(ConnectionString);
         await EnsureExtensionsAsync();
 
-        // EF migrations now provision both the base schema and the bm25v column/trigger/
-        // index (AddBm25Column migration) — no more manual SQL files to chase.
         var opt = new DbContextOptionsBuilder<AristaDbContext>()
             .UseNpgsql(DataSource, o => o.UseVector())
             .Options;
@@ -60,13 +64,47 @@ public sealed class PgvectorFixture : IAsyncLifetime
         return new AristaDbContext(opt);
     }
 
-    // Truncate all test-owned rows; safe to call between tests.
     public async Task ResetAsync()
     {
         await using var conn = await DataSource.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "TRUNCATE TABLE chunks, documents, ingest_runs RESTART IDENTITY CASCADE;";
         await cmd.ExecuteNonQueryAsync();
+    }
+
+    // Ensures the test database named in ConnectionString exists. Connects to the
+    // maintenance `postgres` DB on the same server. `CREATE DATABASE` cannot run in
+    // a transaction; we probe first, then create only if missing.
+    private async Task EnsureTestDatabaseAsync()
+    {
+        var target = new NpgsqlConnectionStringBuilder(ConnectionString);
+        var dbName = target.Database
+            ?? throw new InvalidOperationException("Test connection string must specify Database=");
+
+        // Refuse to reset a prod-looking database by accident.
+        if (!dbName.EndsWith("_test", StringComparison.Ordinal)
+            && !string.Equals(dbName, "arista_test", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Refusing to run tests against '{dbName}'. Use a DB name ending in '_test' "
+                + "(override ARISTA_MCP_TEST_CS if you really need a different name).");
+        }
+
+        var admin = new NpgsqlConnectionStringBuilder(ConnectionString) { Database = "postgres" };
+
+        await using var conn = new NpgsqlConnection(admin.ToString());
+        await conn.OpenAsync();
+        await using var probe = conn.CreateCommand();
+        probe.CommandText = "SELECT 1 FROM pg_database WHERE datname = @n";
+        probe.Parameters.Add(new NpgsqlParameter<string>("n", dbName));
+        var exists = await probe.ExecuteScalarAsync();
+        if (exists is null)
+        {
+            await using var create = conn.CreateCommand();
+            // Identifier must be safely escaped — dbName is validated above to a narrow set.
+            create.CommandText = $"CREATE DATABASE \"{dbName.Replace("\"", "\"\"", StringComparison.Ordinal)}\";";
+            await create.ExecuteNonQueryAsync();
+        }
     }
 
     private async Task EnsureExtensionsAsync()
@@ -77,8 +115,8 @@ public sealed class PgvectorFixture : IAsyncLifetime
         await using var conn = new NpgsqlConnection(ConnectionString);
         await conn.OpenAsync();
 
-        // init.sql is idempotent for CREATE EXTENSION but create_text_analyzer errors if
-        // the analyzer already exists. Swallow that specific class of error.
+        // init.sql is idempotent for CREATE EXTENSION but create_text_analyzer errors
+        // if the analyzer already exists. Swallow that specific class of error.
         try
         {
             await using var cmd = conn.CreateCommand();
