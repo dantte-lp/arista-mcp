@@ -11,6 +11,7 @@ internal static class Program
         {
             IngestCommand.Build(),
             ServeCommand.Build(),
+            BenchCommand.Build(),
         };
 
         return root.Parse(args).InvokeAsync();
