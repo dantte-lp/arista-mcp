@@ -1,10 +1,17 @@
+using System.CommandLine;
+using AristaMcp.Cli.Commands;
+
 namespace AristaMcp.Cli;
 
 internal static class Program
 {
-    public static int Main(string[] args)
+    public static Task<int> Main(string[] args)
     {
-        _ = args;
-        return 0;
+        var root = new RootCommand("arista-mcp — MCP server + CLI for Arista documentation search")
+        {
+            IngestCommand.Build(),
+        };
+
+        return root.Parse(args).InvokeAsync();
     }
 }
