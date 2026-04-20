@@ -64,3 +64,24 @@ Core has no reference to Data, Embedding, or Server. Tests may reference any lay
 
 Waterfall sprints, each gated by a full `dotnet test` green + extension check. Don't start
 Sprint N+1 until Sprint N's gate passes and `git tag sprint-N-review` exists.
+
+## Sprint 2 additions (embedding + ingest)
+
+- Model assets land under `models/embedder/` via `pwsh scripts/fetch-models.ps1`. The
+  snowflake-arctic-embed-m-v1.5 ONNX export exposes `input_ids` + `attention_mask` inputs
+  (no `token_type_ids`) and emits a pre-pooled `sentence_embedding` `[B, 768]` output —
+  do not rebuild mean-pooling in .NET.
+- `Microsoft.ML.Tokenizers 2.0.0` `BertTokenizer.Create` loads `vocab.txt` (WordPiece),
+  **not** `tokenizer.json`. No batch API — `BertWordPieceTokenizer.EncodeBatch` pads to
+  max-in-batch and builds attention mask.
+- Queries get the Snowflake prefix "Represent this sentence for searching relevant
+  passages: ". Documents are embedded raw (the chunker prepends its own
+  `"{doc.title} > {section.title}\n\n"` context header).
+- Ingest pipeline: `CatalogReader` → `DocumentLoader` → `SectionAwareChunker` →
+  `IEmbedder` → `DocumentRepository` + `ChunkRepository`. Per-doc errors are counted;
+  runs finish `partial` rather than aborting.
+- Incremental skip has two layers: catalog-level (SHA256 of `catalog.json` matches the
+  last successful run) and per-doc (`pdf_sha256` unchanged). `--force` bypasses both.
+- `System.CommandLine 2.0.6` uses `new Option<T>(name)`, collection-init subcommands,
+  `SetAction((ParseResult pr, CancellationToken ct) => ...)`. The beta4 `SetHandler`
+  positional-binding API is gone.
