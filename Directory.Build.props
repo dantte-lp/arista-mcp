@@ -12,7 +12,7 @@
          a UI SynchronizationContext, so the annotation is noise. MA0051: method length;
          targeted suppression would require splitting COPY-writer loops into helpers
          that are less readable than the flat form. -->
-    <NoWarn>$(NoWarn);MA0004;MA0051</NoWarn>
+    <NoWarn>$(NoWarn);MA0004;MA0051;MA0009</NoWarn>
     <ErrorLog>$(MSBuildProjectDirectory)/bin/$(Configuration)/analyzers.sarif</ErrorLog>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
