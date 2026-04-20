@@ -14,7 +14,7 @@ public class IngestRunRepositoryTest(PgvectorFixture fx)
         await fx.ResetAsync();
 
         await using var ctx = fx.CreateContext();
-        var repo = new IngestRunRepository(ctx);
+        var repo = new IngestRunRepository(ctx, TimeProvider.System);
 
         var run = await repo.StartAsync("abc123", CancellationToken.None);
         run.Id.Should().BeGreaterThan(0);
@@ -36,7 +36,7 @@ public class IngestRunRepositoryTest(PgvectorFixture fx)
         await fx.ResetAsync();
 
         await using var ctx = fx.CreateContext();
-        var repo = new IngestRunRepository(ctx);
+        var repo = new IngestRunRepository(ctx, TimeProvider.System);
 
         var good = await repo.StartAsync("GOOD", CancellationToken.None);
         await repo.FinishAsync(good.Id, "success", 1, 0, 1, 3, null, CancellationToken.None);

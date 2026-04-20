@@ -24,6 +24,7 @@ public static class ServerHosting
         ArgumentNullException.ThrowIfNull(settings);
 
         services.AddSingleton(settings);
+        services.AddSingleton(TimeProvider.System);
 
         services.AddSingleton<NpgsqlDataSource>(_ => DataSourceFactory.Build(settings.ConnectionString));
 

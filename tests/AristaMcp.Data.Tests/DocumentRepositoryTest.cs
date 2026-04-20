@@ -15,7 +15,7 @@ public class DocumentRepositoryTest(PgvectorFixture fx)
         await fx.ResetAsync();
 
         await using var ctx = fx.CreateContext();
-        var repo = new DocumentRepository(ctx);
+        var repo = new DocumentRepository(ctx, TimeProvider.System);
 
         await repo.UpsertAsync(new AristaDocument
         {
@@ -55,7 +55,7 @@ public class DocumentRepositoryTest(PgvectorFixture fx)
         await fx.ResetAsync();
 
         await using var ctx = fx.CreateContext();
-        var repo = new DocumentRepository(ctx);
+        var repo = new DocumentRepository(ctx, TimeProvider.System);
 
         await repo.UpsertAsync(new AristaDocument
         {

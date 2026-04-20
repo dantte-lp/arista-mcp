@@ -20,9 +20,9 @@ public class IngestServiceTest(PgvectorFixture fx)
             MinTokens = 5,
         });
         var embedder = new DeterministicMockEmbedder();
-        var docRepo = new DocumentRepository(ctx);
+        var docRepo = new DocumentRepository(ctx, TimeProvider.System);
         var chunkRepo = new ChunkRepository(pg.DataSource, ctx);
-        var runRepo = new IngestRunRepository(ctx);
+        var runRepo = new IngestRunRepository(ctx, TimeProvider.System);
         return new IngestService(chunker, embedder, docRepo, chunkRepo, runRepo);
     }
 

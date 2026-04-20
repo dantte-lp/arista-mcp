@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AristaMcp.Data.Repositories;
 
-public class IngestRunRepository(AristaDbContext db) : IIngestRunRepository
+public class IngestRunRepository(AristaDbContext db, TimeProvider clock) : IIngestRunRepository
 {
     public async Task<IngestRunEntity> StartAsync(string? catalogSha256, CancellationToken ct)
     {
@@ -11,7 +11,7 @@ public class IngestRunRepository(AristaDbContext db) : IIngestRunRepository
         {
             Status = "running",
             CatalogSha256 = catalogSha256,
-            StartedAt = DateTimeOffset.UtcNow,
+            StartedAt = clock.GetUtcNow(),
         };
         db.IngestRuns.Add(entity);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -31,7 +31,7 @@ public class IngestRunRepository(AristaDbContext db) : IIngestRunRepository
         var entity = await db.IngestRuns.FirstOrDefaultAsync(x => x.Id == id, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"ingest_run {id} not found");
 
-        entity.FinishedAt = DateTimeOffset.UtcNow;
+        entity.FinishedAt = clock.GetUtcNow();
         entity.Status = status;
         entity.DocsTotal = docsTotal;
         entity.DocsSkipped = docsSkipped;

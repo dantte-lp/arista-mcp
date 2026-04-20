@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AristaMcp.Data.Repositories;
 
-public class DocumentRepository(AristaDbContext db) : IDocumentRepository
+public class DocumentRepository(AristaDbContext db, TimeProvider clock) : IDocumentRepository
 {
     public async Task UpsertAsync(AristaDocument doc, CancellationToken ct)
     {
@@ -37,7 +37,7 @@ public class DocumentRepository(AristaDbContext db) : IDocumentRepository
         entity.TocCount = doc.TocCount;
         entity.DownloadedAt = doc.DownloadedAt;
         entity.ConvertedAt = doc.ConvertedAt;
-        entity.IngestedAt = DateTimeOffset.UtcNow;
+        entity.IngestedAt = clock.GetUtcNow();
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }

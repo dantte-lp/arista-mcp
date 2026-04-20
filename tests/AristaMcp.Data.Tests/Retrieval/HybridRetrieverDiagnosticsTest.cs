@@ -46,9 +46,9 @@ public class HybridRetrieverDiagnosticsTest(PgvectorFixture fx)
         var svc = new IngestService(
             chunker,
             embedder,
-            new DocumentRepository(ctx),
+            new DocumentRepository(ctx, TimeProvider.System),
             new ChunkRepository(fx.DataSource, ctx),
-            new IngestRunRepository(ctx));
+            new IngestRunRepository(ctx, TimeProvider.System));
         var ingest = await svc.IngestAsync(
             new IngestOptions { CatalogPath = catalogPath, Force = true },
             NullIngestProgress.Instance,
@@ -101,9 +101,9 @@ public class HybridRetrieverDiagnosticsTest(PgvectorFixture fx)
         var svc = new IngestService(
             chunker,
             embedder,
-            new DocumentRepository(ctx),
+            new DocumentRepository(ctx, TimeProvider.System),
             new ChunkRepository(fx.DataSource, ctx),
-            new IngestRunRepository(ctx));
+            new IngestRunRepository(ctx, TimeProvider.System));
         await svc.IngestAsync(
             new IngestOptions { CatalogPath = catalogPath, Force = true },
             NullIngestProgress.Instance,

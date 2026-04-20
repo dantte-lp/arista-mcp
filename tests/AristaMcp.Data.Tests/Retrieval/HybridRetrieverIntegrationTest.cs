@@ -56,9 +56,9 @@ public class HybridRetrieverIntegrationTest(PgvectorFixture fx)
         var service = new IngestService(
             chunker,
             embedder,
-            new DocumentRepository(ctx),
+            new DocumentRepository(ctx, TimeProvider.System),
             new ChunkRepository(fx.DataSource, ctx),
-            new IngestRunRepository(ctx));
+            new IngestRunRepository(ctx, TimeProvider.System));
         var ingest = await service.IngestAsync(
             new IngestOptions { CatalogPath = catalogPath, Force = true },
             NullIngestProgress.Instance,
