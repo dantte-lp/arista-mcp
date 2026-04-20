@@ -66,6 +66,17 @@ Add to your `claude_desktop_config.json`:
 
 For HTTP mode the client connects to `http://127.0.0.1:8080/` (MCP Streamable HTTP, stateless).
 
+## Test / production database isolation
+
+The integration + E2E test suites provision a separate database — `arista_test` by
+default — so running `dotnet test` never TRUNCATEs your real ingest in `arista`.
+`PgvectorFixture` creates that DB on first use and refuses to run against any DB
+whose name doesn't end in `_test` (override via `ARISTA_MCP_TEST_CS` if you really
+need to). Inspect both:
+
+    podman exec arista-mcp-postgres psql -U arista -d arista      -c "SELECT COUNT(*) FROM chunks;"
+    podman exec arista-mcp-postgres psql -U arista -d arista_test -c "SELECT COUNT(*) FROM chunks;"
+
 ## Configuration
 
 Every `AristaMcpSettings` property can be overridden by environment variable (prefix `ARISTA_MCP__`) or by an `arista-mcp.json` file in the working directory. Common overrides:
