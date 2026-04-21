@@ -40,17 +40,27 @@ regressions. Target split:
 Also add **expected-doc-id** ground truth rows where a single canonical doc is
 the right answer (moves toward nDCG@10-style scoring rather than binary hit rate).
 
-### 7.3 — GPU-backed OnnxEmbedder + OnnxReranker
+### 7.3 — CPU-only latency reduction
 
-Package the `Microsoft.ML.OnnxRuntime.Gpu` dependency, swap `AppendExecutionProvider_CPU`
-→ `AppendExecutionProvider_CUDA` when `ARISTA_MCP__Gpu=true`. Measure against CPU
-baseline:
-- Expected: p95 2.3 s → < 400 ms (RTX 4070, CUDA 13 + cuDNN).
-- Add a `bench --compare cpu,gpu` flag that runs twice and diffs.
+**Runtime is CPU-only by design** — GPU is reserved for offline fine-tuning
+workflows (Sprint 9+). Latency wins without a GPU:
 
-Risks: CUDA 13 vs ONNX Runtime 1.24.4's CUDA 12 binding — may need to pin a newer
-ONNX Runtime or fall back to CPU on provider-init failure (logged warning, not
-hard error).
+- **fp16 embedder variant.** `fetch-models.ps1` can swap to
+  `onnx/model_fp16.onnx` (~218 MB, half the fp32 size). Expected ~1.5–2× faster
+  on modern CPUs with AVX2/AVX-512 while preserving retrieval quality
+  (Snowflake's card confirms negligible nDCG@10 delta).
+- **Per-session query embedding cache.** Identical repeated queries hit the
+  same embedding; memoize the last N (LRU, default 256). Matters for
+  conversational flows where Claude issues "EVPN" then "EVPN configuration" —
+  both contain the same expanded tokens.
+- **Rerank candidate cap + early exit.** Currently `RerankTopN = 30` always.
+  Reduce to 20 when the RRF top-5 scores cluster tightly (no value in
+  reranking 30 near-duplicates); keep 30 when the fusion is spread.
+- **Warm the ONNX session on first request.** First query pays ~200 ms
+  graph-init cost currently amortized in each cold serve. Pre-warm at host
+  startup with a throwaway embed call.
+
+Target: p95 **2.3 s → ≤ 1.2 s** on CPU; top-10 hit rate unchanged.
 
 ### 7.4 — Heading-normalization edge cases
 
@@ -73,7 +83,7 @@ only the highest-scoring chunk per (document_id, section_title) in the output.
 ### Sprint 7 gate
 
 - [ ] Bench top-10 ≥ 95 % (expanded 100-query set)
-- [ ] p95 latency < 500 ms (CPU) or < 100 ms (GPU)
+- [ ] p95 latency ≤ 1.2 s (CPU, no GPU at runtime)
 - [ ] ≥ 95 % of chunks have `page_start`
 - [ ] `v0.1.3` tag
 
@@ -238,10 +248,10 @@ Open questions to resolve before Sprint 7 starts:
 2. **FluentAssertions 8 license:** keep, migrate to Shouldly, or pin back to
    FluentAssertions 7.2.0 MIT? Lean: migrate to Shouldly in Sprint 8 as part of
    operational hygiene.
-3. **GPU provider:** wire CUDA at Sprint 7 (recommended) or delay to post-v0.2
-   once we have objective quality metrics to justify the latency cost of
-   shipping heavy containers? Lean: Sprint 7 — latency is currently the #1
-   user-facing gripe at 2.3 s p95 CPU.
+3. **GPU provider at runtime: decided — NO.** Runtime stays CPU-only. GPU is
+   permitted only for offline reranker fine-tuning (Sprint 9+ backlog item).
+   Latency win in Sprint 7.3 instead comes from fp16 model + query-embedding
+   cache + rerank cap tuning (target p95 2.3 s → ≤ 1.2 s).
 4. **Bench nDCG@10 vs binary hit rate:** binary is cheap + intuitive; nDCG
    requires labelled relevance grades (1-3 per candidate). Lean: add a
    "preferred_doc_id" field to `BenchmarkQuery` and compute MRR@10 as an

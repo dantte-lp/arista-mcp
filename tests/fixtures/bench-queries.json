@@ -12,7 +12,7 @@
     { "query": "MSS Multi-Domain Segment Security", "expect_any": ["MSS"] },
     { "query": "CVP audit logs schema", "expect_any": ["CV-", "CloudVision", "Audit"] },
     { "query": "AVD Arista Validated Designs", "expect_any": ["AVD"] },
-    { "query": "hardware installation rack mount guide", "expect_any": ["Hardware", "Installation", "rack"] },
+    { "query": "hardware installation rack mount guide", "expect_product": "hardware", "expect_any": ["Hardware", "Installation", "rack"] },
     { "query": "EOS 4.35 new features release notes", "expect_any": ["EOS", "4.35"] },
     { "query": "LACP port-channel bundle", "expect_any": ["EOS", "LACP"] },
     { "query": "VARP virtual ARP default gateway", "expect_any": ["EOS", "VARP", "User-Manual"] },
@@ -27,8 +27,8 @@
     { "query": "Segment Routing SR-MPLS", "expect_any": ["EOS", "Segment", "SR"] },
     { "query": "optical cabling 400G QSFP", "expect_any": ["Cabling", "Optics", "400G"] },
     { "query": "show interfaces counters errors", "expect_any": ["EOS", "User-Manual", "show"] },
-    { "query": "aboot boot loader USB recovery", "expect_any": ["aboot", "Aboot"] },
-    { "query": "CVA Arista validator ansible", "expect_any": ["CVA"] },
-    { "query": "CVW CloudVision WiFi configuration", "expect_any": ["CVW", "cvw"] }
+    { "query": "aboot boot loader USB recovery", "expect_product": "aboot", "expect_any": ["aboot", "Aboot"] },
+    { "query": "CVA Arista validator ansible", "expect_product": "cva", "expect_any": ["CVA", "cva"] },
+    { "query": "CVW CloudVision WiFi configuration", "expect_product": "cvw", "expect_any": ["CVW", "cvw", "wifi"] }
   ]
 }

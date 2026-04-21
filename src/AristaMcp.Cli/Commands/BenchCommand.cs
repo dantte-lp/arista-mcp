@@ -127,8 +127,8 @@ public static class BenchCommand
                 ct).ConfigureAwait(false);
             sw.Stop();
 
-            var hitTop1 = resp.Results.Count > 0 && ResultMatches(resp.Results[0], q.ExpectAny);
-            var hitTopK = resp.Results.Any(r => ResultMatches(r, q.ExpectAny));
+            var hitTop1 = resp.Results.Count > 0 && ResultMatches(resp.Results[0], q);
+            var hitTopK = resp.Results.Any(r => ResultMatches(r, q));
 
             rows.Add(new BenchRow(q.Query, hitTop1, hitTopK, sw.Elapsed.TotalMilliseconds));
         }
@@ -194,14 +194,20 @@ public static class BenchCommand
         });
     }
 
-    private static bool ResultMatches(Core.Models.ChunkResult r, IReadOnlyList<string> expectAny)
+    private static bool ResultMatches(Core.Models.ChunkResult r, Benchmarks.BenchmarkQuery query)
     {
-        if (expectAny.Count == 0)
+        if (query.ExpectProduct is not null
+            && string.Equals(r.Product, query.ExpectProduct, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (query.ExpectAny.Count == 0)
         {
             return false;
         }
 
-        return expectAny.Any(token =>
+        return query.ExpectAny.Any(token =>
             r.DocumentSlug.Contains(token, StringComparison.OrdinalIgnoreCase)
             || r.DocumentTitle.Contains(token, StringComparison.OrdinalIgnoreCase));
     }
