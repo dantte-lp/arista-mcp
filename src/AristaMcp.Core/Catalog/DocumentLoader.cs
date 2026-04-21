@@ -158,10 +158,18 @@ public static partial class DocumentLoader
         return s;
     }
 
-    // Pairs MD-derived sections to JSON-derived sections in order, keyed by
-    // (level, cleaned_title). The first unmatched JSON section at a given level stays
-    // queued until a later MD heading at that level matches it. Unmatched MD sections
-    // keep null pages — never worse than the pre-enrichment behaviour.
+    // Pairs MD-derived sections to JSON-derived sections in order by cleaned_title.
+    // LEVEL IS IGNORED: arista-docs' enrich.build_sections emits level-1 entries for
+    // the entire flattened TOC, while the MD walker reads real `#`/`##`/`###` depth
+    // (MD L3 ↔ JSON L1 is common). The sequence of cleaned titles is the authoritative
+    // pairing.
+    //
+    // Forward scan with a small lookahead: MD heading at position i matches the next
+    // unconsumed JSON entry whose cleaned title equals this MD's cleaned title within
+    // a short window. If no match inside the window, that MD chunk stays null-paged
+    // and the JSON cursor doesn't advance — the next MD heading may still pair with
+    // the skipped JSON entry. Resilient to a few extra MD or JSON headings without
+    // losing alignment for the rest of the doc.
     public static IReadOnlyList<Section> StampPagesFromJson(
         IReadOnlyList<Section> mdSections,
         IReadOnlyList<JsonSection> jsonSections)
@@ -174,34 +182,40 @@ public static partial class DocumentLoader
             return mdSections;
         }
 
-        // Per-level FIFO of JSON sections, with cleaned title captured once.
-        var byLevel = new Dictionary<short, Queue<(string CleanedTitle, JsonSection Section)>>();
-        foreach (var js in jsonSections)
+        var jsonCleaned = new (string Cleaned, JsonSection Section)[jsonSections.Count];
+        for (var i = 0; i < jsonSections.Count; i++)
         {
-            if (!byLevel.TryGetValue(js.Level, out var q))
-            {
-                q = new Queue<(string, JsonSection)>();
-                byLevel[js.Level] = q;
-            }
-
-            q.Enqueue((CleanHeading(js.Title), js));
+            jsonCleaned[i] = (CleanHeading(jsonSections[i].Title), jsonSections[i]);
         }
 
+        const int Lookahead = 3;
         var result = new List<Section>(mdSections.Count);
+        var jsonIdx = 0;
+
         foreach (var md in mdSections)
         {
             var mdClean = CleanHeading(md.Title);
-            if (byLevel.TryGetValue(md.Level, out var q)
-                && q.Count > 0
-                && string.Equals(q.Peek().CleanedTitle, mdClean, StringComparison.Ordinal))
+            var matchAt = -1;
+            var bound = Math.Min(jsonCleaned.Length, jsonIdx + Lookahead + 1);
+            for (var probe = jsonIdx; probe < bound; probe++)
             {
-                var (_, js) = q.Dequeue();
+                if (string.Equals(jsonCleaned[probe].Cleaned, mdClean, StringComparison.Ordinal))
+                {
+                    matchAt = probe;
+                    break;
+                }
+            }
+
+            if (matchAt >= 0)
+            {
+                var js = jsonCleaned[matchAt].Section;
                 result.Add(md with { PageStart = js.PageStart, PageEnd = js.PageEnd });
+                jsonIdx = matchAt + 1;
             }
             else
             {
-                // Retain the MD section without page info; don't pop the queue so the
-                // next MD heading at this level still has a shot at the next JSON entry.
+                // Extra MD heading the JSON side doesn't know about. Leave null-paged
+                // and try to re-sync on the next MD heading against the same cursor.
                 result.Add(md);
             }
         }

@@ -15,6 +15,7 @@ public sealed class SearchDocsTool(IHybridRetriever retriever)
         [Description("Optional category filter ('toi' or 'manual').")] string? category = null,
         [Description("Optional product filter.")] string? product = null,
         [Description("Include per-stage diagnostics (dense/sparse counts, timings).")] bool withDiagnostics = false,
+        [Description("Drop duplicate chunks from the same document+section, keeping only the top-scoring.")] bool dedupPerSection = false,
         CancellationToken ct = default)
     {
         var limit = Math.Clamp(topK, 1, 50);
@@ -25,6 +26,7 @@ public sealed class SearchDocsTool(IHybridRetriever retriever)
             RerankTopN = Math.Max(30, limit * 3),
             Category = category,
             Product = product,
+            DedupPerSection = dedupPerSection,
         };
 
         var response = await retriever.SearchAsync(query, opts, ct).ConfigureAwait(false);

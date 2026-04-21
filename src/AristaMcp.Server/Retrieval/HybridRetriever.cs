@@ -58,10 +58,12 @@ public sealed class HybridRetriever(
         rerankSw.Stop();
 
         var rerankScore = rerankResults.ToDictionary(r => r.ChunkId, r => r.Score);
-        var ranked = topForRerank
-            .OrderByDescending(f => rerankScore.TryGetValue(f.Row.ChunkId, out var s) ? s : 0f)
-            .Take(options.Limit)
-            .ToList();
+        var reranked = topForRerank
+            .OrderByDescending(f => rerankScore.TryGetValue(f.Row.ChunkId, out var s) ? s : 0f);
+
+        var ranked = options.DedupPerSection
+            ? DedupPerSection(reranked).Take(options.Limit).ToList()
+            : reranked.Take(options.Limit).ToList();
 
         var results = ranked.Select(f => Build(f, rerankScore)).ToList();
         total.Stop();
@@ -206,6 +208,23 @@ public sealed class HybridRetriever(
         return [.. scores.Values
             .OrderByDescending(x => x.Rrf)
             .Select(x => new FusedCandidate(x.Row, x.Rrf, x.DenseRank, x.SparseRank, x.DenseDistance, x.SparseDistance))];
+    }
+
+    // Emits at most one chunk per (document_id, section_title ?? raw_content-prefix) —
+    // whichever scored highest post-rerank. Leaves the order of the retained chunks
+    // exactly as the caller passed in. Chunks with null section_title are still deduped
+    // by document_id only (a single null section chunk per doc).
+    private static IEnumerable<FusedCandidate> DedupPerSection(IEnumerable<FusedCandidate> ranked)
+    {
+        var seen = new HashSet<(string DocumentId, string SectionKey)>();
+        foreach (var f in ranked)
+        {
+            var key = (f.Row.DocumentId, f.Row.SectionTitle ?? string.Empty);
+            if (seen.Add(key))
+            {
+                yield return f;
+            }
+        }
     }
 
     private static ChunkResult Build(FusedCandidate f, Dictionary<long, float> rerankScore) =>

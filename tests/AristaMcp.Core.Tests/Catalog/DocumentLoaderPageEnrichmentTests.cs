@@ -84,22 +84,48 @@ public class DocumentLoaderPageEnrichmentTests
     }
 
     [Fact]
-    public void StampPages_SameTitleAtDifferentLevels_IsolatedByLevel()
+    public void StampPages_LevelMismatch_StillMatchesByTitleOrder()
     {
+        // arista-docs' enrich.py flattens the TOC — every JSON section is emitted as
+        // level=1 regardless of the MD's actual `#`/`##`/`###` depth. Pairing must be
+        // title-order-based, not level-keyed, otherwise 28%+ of chunks get null pages.
         var md = new List<Section>
         {
-            new() { Title = "Overview", Level = 1, Content = "top" },
-            new() { Title = "Overview", Level = 2, Content = "sub" },
+            new() { Title = "Overview",   Level = 3, Content = "first" },
+            new() { Title = "Deep Dive",  Level = 4, Content = "second" },
         };
         var json = new List<JsonSection>
         {
-            new() { Title = "Overview", Level = 1, PageStart = 0, PageEnd = 1 },
-            new() { Title = "Overview", Level = 2, PageStart = 2, PageEnd = 3 },
+            new() { Title = "Overview",  Level = 1, PageStart = 0, PageEnd = 1 },
+            new() { Title = "Deep Dive", Level = 1, PageStart = 2, PageEnd = 3 },
         };
 
         var stamped = DocumentLoader.StampPagesFromJson(md, json);
 
         stamped[0].PageStart.Should().Be(0);
         stamped[1].PageStart.Should().Be(2);
+    }
+
+    [Fact]
+    public void StampPages_Lookahead_SkipsOneUnmatchedMdHeadingThenResumes()
+    {
+        // An extra MD heading absent from JSON shouldn't derail the rest of the doc.
+        var md = new List<Section>
+        {
+            new() { Title = "Introduction", Level = 1, Content = "A" },
+            new() { Title = "Unknown",      Level = 1, Content = "rogue" },
+            new() { Title = "Conclusion",   Level = 1, Content = "C" },
+        };
+        var json = new List<JsonSection>
+        {
+            new() { Title = "Introduction", Level = 1, PageStart = 0, PageEnd = 1 },
+            new() { Title = "Conclusion",   Level = 1, PageStart = 4, PageEnd = 6 },
+        };
+
+        var stamped = DocumentLoader.StampPagesFromJson(md, json);
+
+        stamped[0].PageStart.Should().Be(0);
+        stamped[1].PageStart.Should().BeNull("'Unknown' is absent from JSON sections");
+        stamped[2].PageStart.Should().Be(4, "lookahead re-syncs Conclusion after the gap");
     }
 }

@@ -19,4 +19,9 @@ public sealed class RetrievalOptions
 
     // Final number of hits returned to the caller.
     public int Limit { get; init; } = 10;
+
+    // When true, drop all but the top-scoring chunk per (document_id, section_title)
+    // after reranking — avoids redundant near-duplicate chunks from long sections
+    // dominating the result set.
+    public bool DedupPerSection { get; init; }
 }
