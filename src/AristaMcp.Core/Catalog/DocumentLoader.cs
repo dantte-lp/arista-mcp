@@ -102,8 +102,16 @@ public static partial class DocumentLoader
 
     public static IReadOnlyList<Section> ExtractSectionsFromMarkdown(string md, string fallbackTitle)
     {
+        // Normalise CRLF → LF first. .NET regex `$` in Multiline mode matches only
+        // before `\n`, never at `\r`, so on Windows-written MD files the heading regex
+        // `[^\r\n]+$` fails for every heading and the whole doc collapses to one
+        // fallback-titled section. Prior Sprint 2 unit tests used LF raw-string literals
+        // and never caught this.
+        var lf = md.Replace("\r\n", "\n", StringComparison.Ordinal)
+                   .Replace("\r", "\n", StringComparison.Ordinal);
+
         // Strip marker chunk markers so they don't bleed into section bodies.
-        var cleaned = PageMarkerRegex().Replace(md, string.Empty);
+        var cleaned = PageMarkerRegex().Replace(lf, string.Empty);
 
         var matches = HeadingRegex().Matches(cleaned);
         if (matches.Count == 0)

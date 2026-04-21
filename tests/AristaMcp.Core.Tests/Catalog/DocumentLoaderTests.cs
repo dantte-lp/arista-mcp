@@ -7,6 +7,23 @@ namespace AristaMcp.Core.Tests.Catalog;
 public class DocumentLoaderTests
 {
     [Fact]
+    public void MarkdownWithCrlfLineEndings_StillSplitsHeadings()
+    {
+        // Regression canary: .NET regex `$` in Multiline mode doesn't match at `\r`,
+        // only before `\n`. Windows-written MD files with CRLF line endings must still
+        // have their ATX headings recognised. The loader normalises to LF before regex.
+        const string md = "# First\r\n\r\nbody A\r\n\r\n## Second\r\n\r\nbody B\r\n";
+
+        var sections = DocumentLoader.ExtractSectionsFromMarkdown(md, fallbackTitle: "doc");
+
+        sections.Should().HaveCount(2);
+        sections[0].Title.Should().Be("First");
+        sections[0].Level.Should().Be((short)1);
+        sections[1].Title.Should().Be("Second");
+        sections[1].Level.Should().Be((short)2);
+    }
+
+    [Fact]
     public void MarkdownWithHeadings_SplitsIntoSections()
     {
         const string md = """
