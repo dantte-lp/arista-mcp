@@ -161,3 +161,22 @@ Sprint N+1 until Sprint N's gate passes and `git tag sprint-N-review` exists.
   throws `MissingMethodException` at first `DbSet<>` access.
 - **AsyncFixer 2.1.0** active; no new warnings surfaced on the existing codebase
   (zero suppressions anywhere in `src/`).
+
+## Sprint 6 additions (v0.1.2)
+
+- **Integration tests run against `arista_test`, not `arista`.** `PgvectorFixture`
+  creates the test DB on first use + migrates it. Do NOT change `ResetAsync`'s
+  truncate target — the DB-name `_test` suffix guard refuses to fire against
+  anything else, so a wrong `ARISTA_MCP_TEST_CS` value now throws at startup
+  instead of silently wiping prod. Prod `arista` is the CLI's / user's DB.
+- **Full-corpus ingest timing: ~25 min CPU, not "several hours".** EOS-User-Manual
+  accounts for ~80 % of wall-clock (5234 pages → ~5400 chunks → ONNX dominates).
+  Remaining 2425 docs ingest in the last ~5 min. GPU would cut total well below
+  10 min but we haven't wired `Microsoft.ML.OnnxRuntime.Gpu` yet.
+- **Bench history append-only** — `tests/fixtures/bench-history.jsonl` now has 3
+  rows; use `jq` or similar to inspect the trend. Full-corpus v0.1.2 baseline:
+  70 % top-1 / 86.7 % top-10 / p50 1.8 s / p95 2.3 s.
+- **Bench query-set curation matters.** A miss in `bench` output doesn't imply a
+  retrieval failure — the `expect_any` token might not match the slug convention
+  for that product (observed for `hardware`, `aboot`, `CVA`, `CVW`). Investigate
+  a miss by running `list_documents --product <x>` first, then patch the query set.

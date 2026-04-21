@@ -3,6 +3,41 @@
 All notable changes to arista-mcp are documented here. Format follows
 [keep-a-changelog](https://keepachangelog.com); dates use ISO-8601.
 
+## [v0.1.2] — 2026-04-21
+
+Sprint 6 — test-DB isolation + full-corpus baseline.
+
+### Added
+
+- **Full-corpus bench baseline.** Ingested all 2426 arista-docs documents (9569 chunks,
+  24:31 wall-clock on CPU) into the prod `arista` DB; bench result appended to
+  `tests/fixtures/bench-history.jsonl` as `v0.1.2-full-corpus-baseline`:
+  - top-1 hit rate **70.0%** (+3.3 pp vs v0.1.1 manual-only)
+  - top-10 hit rate **86.7%** (+6.7 pp vs v0.1.1 manual-only)
+  - latency p50 1812 ms / p95 2342 ms / avg 1807 ms (CPU ONNX, 12-core)
+- **Sprint 6 plan doc** at `docs/superpowers/plans/2026-04-20-arista-mcp-sprint-6.md`.
+
+### Changed
+
+- **`PgvectorFixture` now provisions its own `arista_test` database.** Default
+  connection string changed to `Database=arista_test`; on `InitializeAsync` the
+  fixture connects to the maintenance `postgres` DB, creates the test DB if missing,
+  applies `docker/init.sql` extensions, runs EF migrations, then truncates. Prod
+  `arista` ingest is never touched by `dotnet test` again.
+- **Safety guard:** the fixture refuses to run against any DB whose name doesn't end
+  in `_test` (override via `ARISTA_MCP_TEST_CS` for unusual setups). Prevents the
+  exact "release-gate wipes the bench dataset" incident that Sprint 5 hit.
+
+### Notes
+
+- Earlier fear of a "5-hour CPU ingest" was conservative. Actual budget on a 12-core
+  Windows/Podman host: **~25 minutes** for the full 2426-doc corpus. EOS-User-Manual
+  (5234 pages / 17k sections) dominates the first ~20 min; the remaining 2425 docs
+  finish in the last 5.
+- Four bench queries still miss (`hardware`, `aboot`, `CVA`, `CVW`) but that's a
+  bench-set curation issue — the query's `expect_any` tokens don't match the actual
+  slug conventions in the catalog, not a retrieval quality problem.
+
 ## [v0.1.1] — 2026-04-20
 
 Sprint 5 — post-v0.1 hygiene + JSON enrichment + E2E coverage.
