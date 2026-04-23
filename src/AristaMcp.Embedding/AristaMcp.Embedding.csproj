@@ -1,10 +1,27 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <RootNamespace>AristaMcp.Embedding</RootNamespace>
+    <!--
+      Pick ONE of Microsoft.ML.OnnxRuntime (CPU) or .Gpu at build time. Both
+      ship the same managed assembly; having both in one output directory
+      produces an ambiguous onnxruntime.dll resolution and undefined behaviour
+      at runtime (see microsoft/onnxruntime#2184). A runtime flag isn't
+      possible until the CUDA Plugin EP gets a stable C# API.
+
+      Default = CPU. Opt-in to GPU with `dotnet build -p:UseGpuOnnx=true` —
+      intended for one-shot batch ingests where the 5-10× embedding speedup
+      justifies a separate build. Production serve should stay CPU because
+      a single query embedding is sub-200 ms on CPU and GPU warm-up is not
+      worth the VRAM budget.
+
+      See docs/onnx-provider.md for the full recipe.
+    -->
+    <UseGpuOnnx Condition="'$(UseGpuOnnx)' == ''">false</UseGpuOnnx>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../AristaMcp.Core/AristaMcp.Core.csproj" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Condition="'$(UseGpuOnnx)' != 'true'" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Condition="'$(UseGpuOnnx)' == 'true'" />
     <PackageReference Include="Microsoft.ML.Tokenizers" />
     <PackageReference Include="Microsoft.Extensions.AI" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />

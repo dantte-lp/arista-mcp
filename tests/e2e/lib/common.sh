@@ -84,6 +84,10 @@ wait_for_pg() {
 }
 
 # --- CLI wrapper -----------------------------------------------------------
+# DOTNET_CONFIG override routes to Release when the tree was built that way
+# (e.g. the GPU-ingest flow builds Release to minimise CUDA overhead). Default
+# stays Debug to match the plain `dotnet build` in the other scripts.
 arista_mcp() {
-  (cd "$REPO_ROOT" && dotnet run --project src/AristaMcp.Cli --no-build -- "$@")
+  local cfg="${DOTNET_CONFIG:-Debug}"
+  (cd "$REPO_ROOT" && dotnet run --project src/AristaMcp.Cli --no-build -c "$cfg" -- "$@")
 }
