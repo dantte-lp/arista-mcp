@@ -162,6 +162,43 @@ Sprint N+1 until Sprint N's gate passes and `git tag sprint-N-review` exists.
 - **AsyncFixer 2.1.0** active; no new warnings surfaced on the existing codebase
   (zero suppressions anywhere in `src/`).
 
+## Sprint 8 additions (v0.1.4 in-progress)
+
+- **Postgres memory knobs are 3 pieces, not 1.** compose.yaml command-line,
+  `docker/init.sql` per-DB `ALTER DATABASE`, and live per-DB state (from an
+  earlier run). Changing the command-line alone doesn't flip the value — the
+  per-DB override (`source='database'`) wins. When tuning, update both
+  compose.yaml AND init.sql AND run `ALTER DATABASE arista RESET <name>` on
+  already-running DBs, or rebuild the image + wipe the volume.
+- **`EmbeddingVariant=fp16` toggle.** Resolves `model_fp16.onnx` via
+  `Core/Settings/ModelPaths`. If you forget to fetch `model_fp16.onnx`,
+  startup fails with a clear "embedder model missing" path. Default stays
+  fp32 — don't flip the default without a fresh bench row.
+- **`IngestOptions.ChunkSubBatchSize` = 2000.** `IngestService` fans huge
+  docs across sub-batches (doc upsert + chunk wipe happen once up front,
+  only the embed+BulkInsert loop fans out). Chunk indices stay dense
+  (`0..N-1`) across sub-batches — the index is computed from the draft's
+  global offset, not the per-slice offset.
+- **Adaptive rerank is a real invariant now.** If RRF top-5 span ≤ 0.02,
+  `HybridRetriever` floors rerank depth to 10 regardless of `RerankTopN`.
+  Tests/benches asserting on the absolute number of reranked candidates
+  must account for this (the bench harness doesn't; it uses fixed options
+  and measures what the user gets in practice).
+- **`QueryEmbeddingCache` is NOT strict LRU.** Eviction is
+  clear-oldest-half when over capacity. For 256 entries this works; don't
+  push capacity > ~4k without rethinking the data structure (current
+  impl sorts the whole dictionary on each eviction).
+- **Warm-on-startup may throw inside DI.** `ServerHosting.BuildAndWarmEmbedder`
+  catches non-fatal exceptions so a missing model doesn't hang host
+  startup, but OOM / StackOverflow still propagate — those aren't safe
+  to swallow.
+- **`arista-mcp curate-triples`** needs a live DB + bench fixture; same
+  wiring as `bench`. Default output is `tests/fixtures/reranker-triples.jsonl`;
+  hard-negative filter requires positive and negative to differ in BOTH
+  doc AND product (same-product negatives collapse cross-encoder margin
+  loss). Will produce fewer triples than (queries × negatives) on corpora
+  with limited product diversity.
+
 ## Sprint 7 additions (v0.1.3)
 
 - **CRLF in MD files is the default** (arista-docs is converted on Windows). Any

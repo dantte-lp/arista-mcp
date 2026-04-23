@@ -3,6 +3,62 @@
 All notable changes to arista-mcp are documented here. Format follows
 [keep-a-changelog](https://keepachangelog.com); dates use ISO-8601.
 
+## [unreleased / v0.1.4-in-progress] — 2026-04-23
+
+Sprint 8 — unblock full-corpus bench + prep GPU fine-tune pipeline.
+
+### Added
+
+- **`arista-mcp curate-triples`** — generates `(query, positive, negatives)`
+  JSONL for the Sprint 9 cross-encoder reranker fine-tune. Hard negatives
+  come from top-20 HybridRetriever hits that differ in both document AND
+  product from the positive; same-product negatives collapse margin loss
+  to no-op. Defaults to 4 negatives per query; retrieval wiring identical
+  to `bench` so `--models` and `ARISTA_MCP__` env vars work the same way.
+- **`EmbeddingVariant` setting.** `fp32` (default) loads `model.onnx` as
+  before; `ARISTA_MCP__EmbeddingVariant=fp16` swaps to `model_fp16.onnx`
+  (~218 MB vs 436 MB, 1.5–2× CPU speedup, ≤ 1 pp nDCG@10 cost per
+  Snowflake's card). `ModelPaths` helper in `Core/Settings` is the single
+  resolver; every callsite (serve, bench, ingest, curate-triples) routes
+  through it.
+- **`IngestOptions.ChunkSubBatchSize`** (default 2000). `IngestService`
+  fans embed+BulkInsert across sub-batches when a doc exceeds the
+  threshold, one doc-metadata upsert + one chunk wipe up front. Motivated
+  by EOS-User-Manual generating ~40 k chunks post-CRLF-fix — a single
+  COPY BINARY at that scale OOMs the container.
+
+### Changed (perf)
+
+- **Query embedding LRU cache** in `HybridRetriever` (256 slots,
+  clear-oldest-half eviction). Skips the ~100-200 ms ONNX inference on
+  repeated normalised queries (common in Claude-driven flows). Eviction
+  is intentionally coarse — a perf cache doesn't justify linked-list +
+  lock overhead.
+- **Adaptive rerank cap.** When RRF top-5 scores span ≤ 0.02, the
+  candidates are effectively tied and sending 30 to the cross-encoder is
+  noise; depth floors to 10 in that case. ~50 ms/query saving on
+  tight-cluster searches; spread-out results still rerank the full
+  `RerankTopN`.
+- **Warm-on-startup.** `ServerHosting` runs a throwaway embed at DI
+  resolution time so the first real `tools/call search_docs` doesn't pay
+  the ~200 ms ONNX graph-init latency. Failures swallowed (non-fatal).
+
+### Infrastructure
+
+- **Postgres memory tuning.** `docker/compose.yaml` bumps
+  `shared_buffers` 512 MB → 2 GB, `work_mem` 32 MB → 256 MB,
+  `maintenance_work_mem` 2 GB → 4 GB, `max_wal_size` → 4 GB, drops
+  `max_connections` 50 → 20. `init.sql` per-DB override raised to match so
+  a volume wipe doesn't re-clamp to 2 GB. HNSW rebuild + bm25v trigger at
+  full-corpus scale no longer OOM-kill the container.
+
+### Deferred to future sprint
+
+- **Full-corpus re-ingest + `v0.1.4-full-corpus-crlf` bench row** —
+  kicked off but dominated by EOS-User-Manual's 40 k chunks; doesn't
+  fit in one session. Resumes on next run via per-doc `pdf_sha256` skip.
+- **Structured logging + OTEL traces/metrics** — deferred to v0.1.5.
+
 ## [v0.1.3] — 2026-04-22
 
 Sprint 7 — retrieval quality: heading/page-number bug hunt + bench curation.
