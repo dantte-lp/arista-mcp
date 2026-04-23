@@ -130,6 +130,28 @@ public sealed class IngestService(
                 return (0, "no sections extracted");
             }
 
+            // Defensive: upstream arista-docs FakeConverter used to stamp
+            // placeholder MD as accurate (fixed upstream; legacy catalogs may
+            // still carry the lie). Placeholder bodies contain only a single
+            // Fake-conversion heading plus a byte count, so chunking them
+            // poisons BM25 with the literal phrase and wastes ~1 sec per doc
+            // on ONNX inference. Two filters: a title prefix check and a
+            // total-body minimum (40 chars; real fixtures land 60+).
+            if (loaded.Sections.Count > 0
+                && loaded.Sections[0].Title.StartsWith("Fake conversion of", StringComparison.Ordinal))
+            {
+                return (0, "placeholder doc (FakeConverter output) — skipped");
+            }
+            var totalBodyChars = 0;
+            foreach (var s in loaded.Sections)
+            {
+                totalBodyChars += s.Content.Length;
+            }
+            if (totalBodyChars < 40)
+            {
+                return (0, $"placeholder doc ({totalBodyChars} body chars) — skipped");
+            }
+
             var drafts = chunker.Chunk(loaded.Metadata.Title, loaded.Sections);
             if (drafts.Count == 0)
             {
