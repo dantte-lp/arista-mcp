@@ -3,7 +3,7 @@
 All notable changes to arista-mcp are documented here. Format follows
 [keep-a-changelog](https://keepachangelog.com); dates use ISO-8601.
 
-## [unreleased / v0.1.4-in-progress] — 2026-04-23
+## [v0.1.4] — 2026-04-23
 
 Sprint 8 — unblock full-corpus bench + prep GPU fine-tune pipeline.
 
@@ -74,13 +74,30 @@ Sprint 8 — unblock full-corpus bench + prep GPU fine-tune pipeline.
   `docs/otel.md`. Verified end-to-end: a single `bench` run populates
   the `arista-mcp` service in Jaeger with the full span tree.
 
-### Deferred to future sprint
+### Bench result
 
-- **Full-corpus re-ingest + `v0.1.4-full-corpus-crlf` bench row** —
-  ingest kicked off but dominated by EOS-User-Manual's ~40 k chunks
-  plus the 2198-doc TOI real-Marker reconversion after
-  `arista-docs purge-fakes`. Run overnight. Once complete, run
-  `arista-mcp bench --history tests/fixtures/bench-history.jsonl --label v0.1.4-full-corpus-crlf`.
+`v0.1.4-full-corpus-crlf` row appended to `tests/fixtures/bench-history.jsonl`
+(111 queries against the full 2427-doc corpus, 59 356 chunks, GPU-assisted
+ingest + query embed):
+
+| metric | v0.1.2 | v0.1.3 (partial) | **v0.1.4** |
+|---|---|---|---|
+| top-1 hit rate | 70.0 % | 36.94 % | **73.87 %** |
+| top-10 hit rate | 86.67 % | 67.57 % | **99.10 %** |
+| p95 latency | 2342 ms | 1909 ms | **57.1 ms** (GPU) |
+
+p95 figure is GPU-assisted — a separate CPU-only bench run is pending
+for a realistic serve-time number. Retrieval-quality deltas (top-1,
+top-10) hold regardless of the inference backend.
+
+### Build variant
+
+- **`-p:UseGpuOnnx=true` conditional OnnxRuntime package.** Default
+  still resolves `Microsoft.ML.OnnxRuntime` (CPU). Opt-in to
+  `.Gpu` for one-shot batch ingests via
+  `pwsh scripts/build-gpu.ps1 -Release -Clean`. See `docs/onnx-provider.md`
+  for rationale, gotchas (CUDA 12 DLLs from PyTorch via PATH work in a
+  pinch), and the reason we can't runtime-switch (Microsoft #2198).
 
 ## [v0.1.3] — 2026-04-22
 
