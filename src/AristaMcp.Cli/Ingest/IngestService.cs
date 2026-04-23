@@ -1,6 +1,7 @@
 using AristaMcp.Core.Catalog;
 using AristaMcp.Core.Chunking;
 using AristaMcp.Core.Models;
+using AristaMcp.Core.Observability;
 using AristaMcp.Data.Repositories;
 using AristaMcp.Embedding;
 
@@ -117,6 +118,10 @@ public sealed class IngestService(
         IIngestProgress progress,
         CancellationToken ct)
     {
+        using var docSpan = AristaActivity.Source.StartActivity(AristaActivity.Operations.IngestDocument);
+        docSpan?.SetTag(AristaActivity.Tags.DocId, entry.Id);
+        docSpan?.SetTag(AristaActivity.Tags.DocSlug, entry.Slug);
+
         try
         {
             var loaded = await DocumentLoader.LoadAsync(entry, catalogBaseDir, ct).ConfigureAwait(false);
@@ -145,11 +150,19 @@ public sealed class IngestService(
 
             var subBatchSize = Math.Max(1, options.ChunkSubBatchSize);
             var totalDrafts = drafts.Count;
+            docSpan?.SetTag(AristaActivity.Tags.ChunkCount, totalDrafts);
+
             var inserted = 0;
+            var subBatchIndex = 0;
+            var subBatchTotal = (totalDrafts + subBatchSize - 1) / subBatchSize;
             for (var start = 0; start < totalDrafts; start += subBatchSize)
             {
                 ct.ThrowIfCancellationRequested();
                 var end = Math.Min(start + subBatchSize, totalDrafts);
+                using var subSpan = AristaActivity.Source.StartActivity(AristaActivity.Operations.IngestSubBatch);
+                subSpan?.SetTag(AristaActivity.Tags.SubBatchIndex, subBatchIndex);
+                subSpan?.SetTag(AristaActivity.Tags.SubBatchTotal, subBatchTotal);
+
                 var slice = new List<ChunkDraft>(end - start);
                 for (var k = start; k < end; k++)
                 {
@@ -188,6 +201,8 @@ public sealed class IngestService(
                     progress.Log(
                         $"  {entry.Slug}: sub-batch {inserted}/{totalDrafts} chunks");
                 }
+
+                subBatchIndex++;
             }
 
             return (inserted, null);

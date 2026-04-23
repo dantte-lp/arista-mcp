@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using AristaMcp.Core.Models;
+using AristaMcp.Core.Observability;
 using AristaMcp.Core.Retrieval;
 using AristaMcp.Embedding;
 using Npgsql;
@@ -42,24 +43,34 @@ public sealed class HybridRetriever(
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(options);
 
+        using var outerSpan = AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchHybrid);
+        outerSpan?.SetTag(AristaActivity.Tags.QueryLength, query.Length);
+        if (options.Category is not null) outerSpan?.SetTag(AristaActivity.Tags.Category, options.Category);
+        if (options.Product is not null) outerSpan?.SetTag(AristaActivity.Tags.Product, options.Product);
+
         var total = Stopwatch.StartNew();
         var expansion = QueryExpander.Expand(query);
 
         var embedSw = Stopwatch.StartNew();
         HalfVector qVec;
+        bool cacheHit;
         if (_queryCache.TryGet(expansion.Expanded, out var cached))
         {
             qVec = cached;
+            cacheHit = true;
         }
         else
         {
+            using var embedSpan = AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchEmbed);
             var qVecs = await embedder.EmbedAsync(
                 [expansion.Expanded], isQuery: true, ct).ConfigureAwait(false);
             Half[] halfArr = [.. qVecs[0].Select(static f => (Half)f)];
             qVec = new HalfVector(halfArr);
             _queryCache.Add(expansion.Expanded, qVec);
+            cacheHit = false;
         }
         embedSw.Stop();
+        outerSpan?.SetTag(AristaActivity.Tags.CacheHit, cacheHit);
 
         var denseTask = RunDenseAsync(qVec, options, ct);
         var sparseTask = RunSparseAsync(expansion.Expanded, options, ct);
@@ -74,9 +85,14 @@ public sealed class HybridRetriever(
         // Adaptive rerank: tight-cluster top-5 = rerank signal is noise, cap to floor.
         var rerankTopN = ComputeAdaptiveRerankTopN(fused, options.RerankTopN);
         var topForRerank = fused.Take(rerankTopN).ToList();
+        outerSpan?.SetTag(AristaActivity.Tags.RerankTopN, rerankTopN);
+        outerSpan?.SetTag(AristaActivity.Tags.RerankAdaptive, rerankTopN < options.RerankTopN);
+
         var rerankSw = Stopwatch.StartNew();
+        using var rerankSpan = AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchRerank);
         var rerankInput = topForRerank.Select(f => new RerankCandidate(f.Row.ChunkId, f.Row.Content)).ToList();
         var rerankResults = await reranker.RerankAsync(expansion.Expanded, rerankInput, ct).ConfigureAwait(false);
+        rerankSpan?.Dispose();
         rerankSw.Stop();
 
         var rerankScore = rerankResults.ToDictionary(r => r.ChunkId, r => r.Score);
@@ -102,6 +118,9 @@ public sealed class HybridRetriever(
             RerankMs: rerankSw.Elapsed.TotalMilliseconds,
             TotalMs: total.Elapsed.TotalMilliseconds);
 
+        outerSpan?.SetTag(AristaActivity.Tags.DenseHits, denseRows.Count);
+        outerSpan?.SetTag(AristaActivity.Tags.SparseHits, sparseRows.Count);
+
         return new SearchResponse(results, diag);
     }
 
@@ -110,6 +129,7 @@ public sealed class HybridRetriever(
         RetrievalOptions options,
         CancellationToken ct)
     {
+        using var span = AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchDense);
         const string sql = """
             SELECT c.id, c.document_id, c.chunk_index, c.content, c.raw_content,
                    c.section_title, c.section_level, c.page_start, c.page_end,
@@ -142,6 +162,7 @@ public sealed class HybridRetriever(
         RetrievalOptions options,
         CancellationToken ct)
     {
+        using var span = AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchSparse);
         const string sql = """
             SELECT c.id, c.document_id, c.chunk_index, c.content, c.raw_content,
                    c.section_title, c.section_level, c.page_start, c.page_end,
