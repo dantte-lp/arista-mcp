@@ -10,6 +10,7 @@ Shell-based end-to-end scenarios that go beyond what xUnit can reasonably expres
 |---|---|
 | `01-fresh-deploy.sh` | `compose down -v` → `compose up` → extensions → fetch-models → `dotnet ef database update` → schema verification (bm25v + HNSW + BM25 + triggers) |
 | `02-category-ingest.sh` | ingest `--category manual` (225 docs) → row counts + `bm25v IS NULL == 0` → re-ingest without `--force` returns `status=skipped` |
+| `03-post-reconvert-smoke.sh` | post-`purge-fakes` + real-Marker reconversion gate: zero placeholder conversions, fresh full-corpus ingest, bench top-10 ≥ 90 % / p95 ≤ 1.2 s, curate-triples ≥ 500 rows. Promotion gate for `v0.1.4-rc*` → `v0.1.4`. |
 
 ## Running
 
@@ -28,6 +29,13 @@ already ran or the DB is at least schema-green.
 | `PGHOST` / `PGPORT` / `PGUSER` / `PGDATABASE` / `PGPASSWORD` | local compose values | standard libpq env |
 | `ARISTA_PG_CONTAINER` | `arista-mcp-postgres` | container name for `podman exec` |
 | `ARISTA_DOCS_CATALOG` | `../arista-docs/data/catalog.json` | override the catalog path |
+| `ARISTA_BENCH_QUERIES` | `tests/fixtures/bench-queries.json` | bench/triples query set (03) |
+| `ARISTA_BENCH_HISTORY` | `tests/fixtures/bench-history.jsonl` | bench JSONL history (03) |
+| `ARISTA_BENCH_LABEL` | `v0.1.4-full-corpus-crlf` | tag for the bench row (03) |
+| `ARISTA_MIN_TOP10` | `90` | top-10 hit-rate gate in % (03) |
+| `ARISTA_MAX_P95_MS` | `1200` | p95 latency gate in ms (03) |
+| `ARISTA_MIN_TRIPLES` | `500` | triple count gate (03) |
+| `ARISTA_MIN_CHUNKS` | `25000` | minimum post-ingest chunk count (03) |
 
 ### WSL2 / Windows Podman
 
