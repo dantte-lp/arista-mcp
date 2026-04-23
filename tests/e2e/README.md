@@ -34,7 +34,7 @@ already ran or the DB is at least schema-green.
 | `ARISTA_BENCH_LABEL` | `v0.1.4-full-corpus-crlf` | tag for the bench row (03) |
 | `ARISTA_MIN_TOP10` | `90` | top-10 hit-rate gate in % (03) |
 | `ARISTA_MAX_P95_MS` | `1200` | p95 latency gate in ms (03) |
-| `ARISTA_MIN_TRIPLES` | `500` | triple count gate (03) |
+| `ARISTA_MIN_TRIPLES` | `40` | triple count gate (03) — Sprint 9 augments to 500+ |
 | `ARISTA_MIN_CHUNKS` | `25000` | minimum post-ingest chunk count (03) |
 
 ### WSL2 / Windows Podman

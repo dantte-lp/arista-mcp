@@ -78,6 +78,20 @@ public sealed class IngestService(
 
                 if (docError is not null)
                 {
+                    // Placeholder-filter trips are intentional skips, not errors —
+                    // counting them toward `error` drags the final status to
+                    // "partial" and exit code 1 even when every real doc
+                    // ingested fine. The filter's message is a stable contract
+                    // ("placeholder doc ... — skipped") so we match on that
+                    // substring rather than introducing a new result shape.
+                    if (docError.Contains("placeholder doc", StringComparison.Ordinal))
+                    {
+                        skipped++;
+                        progress.Log($"[skip] {entry.Id}: {docError}");
+                        progress.EndDocument(entry.Id, 0, skipped: true);
+                        continue;
+                    }
+
                     error = docError;
                     progress.Log($"[error] {entry.Id}: {docError}");
                     progress.EndDocument(entry.Id, 0, skipped: false);
