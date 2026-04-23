@@ -71,7 +71,8 @@ public sealed class IngestService(
                     continue;
                 }
 
-                var (chunkCount, docError) = await IngestDocumentAsync(entry, catalog.BaseDirectory, options, ct)
+                var (chunkCount, docError) = await IngestDocumentAsync(
+                    entry, catalog.BaseDirectory, options, progress, ct)
                     .ConfigureAwait(false);
 
                 if (docError is not null)
@@ -113,6 +114,7 @@ public sealed class IngestService(
         CatalogEntry entry,
         string catalogBaseDir,
         IngestOptions options,
+        IIngestProgress progress,
         CancellationToken ct)
     {
         try
@@ -134,31 +136,59 @@ public sealed class IngestService(
                 return (drafts.Count, null);
             }
 
-            var texts = drafts.Select(d => d.Content).ToList();
-            var vectors = await embedder.EmbedAsync(texts, isQuery: false, ct).ConfigureAwait(false);
-
-            var chunks = new List<AristaChunk>(drafts.Count);
-            for (var i = 0; i < drafts.Count; i++)
-            {
-                var d = drafts[i];
-                chunks.Add(new AristaChunk
-                {
-                    DocumentId = entry.Id,
-                    ChunkIndex = i,
-                    Content = d.Content,
-                    RawContent = d.RawContent,
-                    SectionTitle = d.SectionTitle,
-                    SectionLevel = d.SectionLevel,
-                    PageStart = d.PageStart,
-                    PageEnd = d.PageEnd,
-                    TokenCount = d.TokenCount,
-                    Embedding = vectors[i],
-                });
-            }
-
+            // doc metadata + chunk wipe happen once — the sub-batch loop below
+            // only inserts. If a later sub-batch fails we'll leave a doc with
+            // partial chunks; the next `ingest --force` (or an unchanged sha
+            // re-run after fix) will hit DeleteByDocument again and restart.
             await docRepo.UpsertAsync(loaded.Metadata, ct).ConfigureAwait(false);
             await chunkRepo.DeleteByDocumentAsync(entry.Id, ct).ConfigureAwait(false);
-            var inserted = await chunkRepo.BulkInsertAsync(chunks, ct).ConfigureAwait(false);
+
+            var subBatchSize = Math.Max(1, options.ChunkSubBatchSize);
+            var totalDrafts = drafts.Count;
+            var inserted = 0;
+            for (var start = 0; start < totalDrafts; start += subBatchSize)
+            {
+                ct.ThrowIfCancellationRequested();
+                var end = Math.Min(start + subBatchSize, totalDrafts);
+                var slice = new List<ChunkDraft>(end - start);
+                for (var k = start; k < end; k++)
+                {
+                    slice.Add(drafts[k]);
+                }
+
+                var texts = slice.Select(d => d.Content).ToList();
+                var vectors = await embedder.EmbedAsync(texts, isQuery: false, ct).ConfigureAwait(false);
+
+                var chunks = new List<AristaChunk>(slice.Count);
+                for (var j = 0; j < slice.Count; j++)
+                {
+                    var d = slice[j];
+                    chunks.Add(new AristaChunk
+                    {
+                        DocumentId = entry.Id,
+                        ChunkIndex = start + j,
+                        Content = d.Content,
+                        RawContent = d.RawContent,
+                        SectionTitle = d.SectionTitle,
+                        SectionLevel = d.SectionLevel,
+                        PageStart = d.PageStart,
+                        PageEnd = d.PageEnd,
+                        TokenCount = d.TokenCount,
+                        Embedding = vectors[j],
+                    });
+                }
+
+                inserted += await chunkRepo.BulkInsertAsync(chunks, ct).ConfigureAwait(false);
+
+                // Only surface sub-batch progress for docs that actually split.
+                // Normal-sized docs log nothing extra — keeps Sprint 6 output
+                // shape stable in the 99 % case.
+                if (totalDrafts > subBatchSize)
+                {
+                    progress.Log(
+                        $"  {entry.Slug}: sub-batch {inserted}/{totalDrafts} chunks");
+                }
+            }
 
             return (inserted, null);
         }

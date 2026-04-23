@@ -132,6 +132,68 @@ public class IngestServiceTest(PgvectorFixture fx)
         result.DocsSkipped.Should().Be(1, "d2's sha is unchanged");
     }
 
+    [Fact]
+    public async Task SubBatching_SplitsHugeDocIntoMultipleInserts_FinalChunkCountStable()
+    {
+        // Sprint 8.2 canary: when a doc produces more chunks than
+        // ChunkSubBatchSize, IngestService commits them in multiple
+        // BulkInserts. The final on-disk row count, chunk index monotonicity,
+        // and bm25v trigger coverage must match the all-at-once baseline.
+        await fx.ResetAsync();
+
+        using var builder = new FakeCatalogBuilder();
+        builder.AddDoc("big", "big-doc", "Big Doc", "sha-big", BuildManySectionsMarkdown(sections: 60));
+        var catalogPath = builder.Build();
+
+        await using var ctx = fx.CreateContext();
+        var service = MakeService(fx, ctx);
+
+        // Tiny sub-batch forces the loop to trip. 60 sections × chunker
+        // produces ~60 chunks; with SubBatchSize = 10 that's 6 sub-batches.
+        var result = await service.IngestAsync(
+            new IngestOptions
+            {
+                CatalogPath = catalogPath,
+                Force = true,
+                ChunkSubBatchSize = 10,
+            },
+            NullIngestProgress.Instance,
+            CancellationToken.None);
+
+        result.Status.Should().Be("success");
+        result.DocsUpserted.Should().Be(1);
+        result.ChunksUpserted.Should().BeGreaterThanOrEqualTo(60);
+
+        // Chunk indices must be dense 0..N-1, not gapped or reset per sub-batch.
+        await using var conn = await fx.DataSource.OpenConnectionAsync();
+        await using var idxCmd = conn.CreateCommand();
+        idxCmd.CommandText = """
+            SELECT MIN(chunk_index), MAX(chunk_index), COUNT(*) FROM chunks WHERE document_id = 'big';
+            """;
+        await using var r = await idxCmd.ExecuteReaderAsync();
+        (await r.ReadAsync()).Should().BeTrue();
+        var minIdx = r.GetInt32(0);
+        var maxIdx = r.GetInt32(1);
+        var count = r.GetInt64(2);
+        minIdx.Should().Be(0);
+        (maxIdx - minIdx + 1).Should().Be((int)count, "indices must be contiguous across sub-batches");
+    }
+
+    private static string BuildManySectionsMarkdown(int sections)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (var i = 0; i < sections; i++)
+        {
+            sb.Append("# Section ").Append(i).Append("\n\n");
+            for (var w = 0; w < 80; w++)
+            {
+                sb.Append("tok").Append(i).Append('_').Append(w).Append(' ');
+            }
+            sb.Append("\n\n");
+        }
+        return sb.ToString();
+    }
+
     private static string BuildMarkdown(int seed)
     {
         var words = string.Join(' ', Enumerable.Range(0, 200).Select(i => $"w{seed}_{i}"));
