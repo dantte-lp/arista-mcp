@@ -5,6 +5,7 @@ using AristaMcp.Cli.Benchmarks;
 using AristaMcp.Cli.Configuration;
 using AristaMcp.Core.Retrieval;
 using AristaMcp.Core.Settings;
+using AristaMcp.Server.Observability;
 using AristaMcp.Data;
 using AristaMcp.Embedding;
 using AristaMcp.Server.Retrieval;
@@ -77,6 +78,11 @@ public static class BenchCommand
         string? label,
         CancellationToken ct)
     {
+        // Dispose flushes the batch OTLP exporter before the CLI exits —
+        // crucial for a short-lived command that would otherwise drop the
+        // last few seconds of spans. No-op when OTEL isn't enabled.
+        using var otel = OtelConfig.BuildTracerProviderIfEnabled();
+
         var console = AnsiConsole.Console;
         if (!File.Exists(queriesPath))
         {

@@ -57,21 +57,30 @@ Sprint 8 — unblock full-corpus bench + prep GPU fine-tune pipeline.
 - **`System.Diagnostics.ActivitySource` hooks** on the retrieval + ingest
   hot paths. Source name `AristaMcp`, spans `search.hybrid` (root),
   `search.embed`, `search.dense`, `search.sparse`, `search.rerank`,
-  `ingest.document`, `ingest.subbatch`. Zero-cost when no listener is
-  registered. OTLP/Jaeger exporter wiring is an out-of-process concern
-  — consumer registers the source in their host. No NuGet additions.
+  `ingest.document`, `ingest.subbatch`.
+- **OTLP exporter** via `OpenTelemetry 1.15.0` + `Extensions.Hosting`
+  + `Exporter.OpenTelemetryProtocol`. Opt-in: set
+  `ARISTA_MCP__Otel__Endpoint` (or OTel-spec standard
+  `OTEL_EXPORTER_OTLP_ENDPOINT`) to e.g. `http://localhost:4317` and
+  spans ship. When neither is set, `AddOtelIfEnabled` is a no-op — no
+  DI registration, no allocations, no exporter threads.
+- **Both host + CLI paths export.** `arista-mcp serve` uses the Hosting
+  extension (TracerProvider lives for the app lifetime);
+  `arista-mcp bench`, `ingest`, `curate-triples` use the imperative
+  `OtelConfig.BuildTracerProviderIfEnabled()` with `using var` so the
+  batch exporter flushes on command exit — otherwise short-lived
+  commands drop the last few seconds of spans.
+- **Jaeger compose** at `docker/compose.otel.yaml` + recipe in
+  `docs/otel.md`. Verified end-to-end: a single `bench` run populates
+  the `arista-mcp` service in Jaeger with the full span tree.
 
 ### Deferred to future sprint
 
 - **Full-corpus re-ingest + `v0.1.4-full-corpus-crlf` bench row** —
-  ingest kicked off but dominated by EOS-User-Manual's ~40 k chunks;
-  doesn't fit in one session. Resumes on next `ingest --force` via
-  per-doc `pdf_sha256` skip. Once complete, run
+  ingest kicked off but dominated by EOS-User-Manual's ~40 k chunks
+  plus the 2198-doc TOI real-Marker reconversion after
+  `arista-docs purge-fakes`. Run overnight. Once complete, run
   `arista-mcp bench --history tests/fixtures/bench-history.jsonl --label v0.1.4-full-corpus-crlf`.
-- **OTLP exporter registration + Jaeger smoke test** — spans emit but
-  no exporter is wired in-tree. Consumer adds
-  `OpenTelemetry.Exporter.OpenTelemetryProtocol` + registers
-  `"AristaMcp"` as a source in host startup.
 
 ## [v0.1.3] — 2026-04-22
 

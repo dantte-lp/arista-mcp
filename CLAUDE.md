@@ -199,11 +199,17 @@ Sprint N+1 until Sprint N's gate passes and `git tag sprint-N-review` exists.
   loss). Will produce fewer triples than (queries × negatives) on corpora
   with limited product diversity.
 - **ActivitySource `"AristaMcp"`** is the stable telemetry contract.
-  Uses `System.Diagnostics.ActivitySource` directly — no OpenTelemetry
-  package dep inside AristaMcp.* projects. To export: register the source
-  by name in the host process. Renaming the source or any
-  `AristaActivity.Operations.*` constant is a breaking schema change for
-  downstream dashboards.
+  `AristaMcp.Core.Observability.AristaActivity` defines source name +
+  operation + tag constants. Renaming the source or any operation string
+  is a breaking schema change for downstream dashboards.
+- **OTLP exporter is opt-in and has TWO registration paths.** Host-based
+  (`arista-mcp serve`) uses `AddOtelIfEnabled` via DI; short-lived CLI
+  commands (bench, ingest, curate-triples) use
+  `OtelConfig.BuildTracerProviderIfEnabled()` inside `using var`.
+  Both check `ARISTA_MCP__Otel__Endpoint` OR `OTEL_EXPORTER_OTLP_ENDPOINT`.
+  NOTE: adding OTEL to a new CLI command means using the imperative
+  builder, not the DI registration — the batch exporter requires an
+  explicit dispose to flush.
 
 ## Sprint 7 additions (v0.1.3)
 

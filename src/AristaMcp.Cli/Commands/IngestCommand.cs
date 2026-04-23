@@ -5,6 +5,7 @@ using AristaMcp.Cli.Progress;
 using AristaMcp.Core.Chunking;
 using AristaMcp.Core.Settings;
 using AristaMcp.Data;
+using AristaMcp.Server.Observability;
 using AristaMcp.Data.Repositories;
 using AristaMcp.Embedding;
 using Microsoft.EntityFrameworkCore;
@@ -69,6 +70,8 @@ public static class IngestCommand
 
     private static async Task<int> RunAsync(IngestOptions opts, DirectoryInfo? modelsOverride, CancellationToken ct)
     {
+        using var otel = OtelConfig.BuildTracerProviderIfEnabled();
+
         var settings = CliConfiguration.Load();
         if (modelsOverride is not null)
         {

@@ -7,6 +7,7 @@ using AristaMcp.Core.Retrieval;
 using AristaMcp.Core.Settings;
 using AristaMcp.Data;
 using AristaMcp.Embedding;
+using AristaMcp.Server.Observability;
 using AristaMcp.Server.Retrieval;
 using Microsoft.EntityFrameworkCore;
 using Spectre.Console;
@@ -74,6 +75,8 @@ public static class CurateTriplesCommand
         DirectoryInfo? modelsOverride,
         CancellationToken ct)
     {
+        using var otel = OtelConfig.BuildTracerProviderIfEnabled();
+
         var console = AnsiConsole.Console;
 
         if (!File.Exists(queriesPath))

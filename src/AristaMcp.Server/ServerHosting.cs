@@ -3,6 +3,7 @@ using AristaMcp.Core.Settings;
 using AristaMcp.Data;
 using AristaMcp.Data.Repositories;
 using AristaMcp.Embedding;
+using AristaMcp.Server.Observability;
 using AristaMcp.Server.Retrieval;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,6 +48,11 @@ public static class ServerHosting
             sp.GetRequiredService<IEmbedder>(),
             sp.GetRequiredService<IReranker>(),
             sp.GetRequiredService<NpgsqlDataSource>()));
+
+        // Opt-in: registers OpenTelemetry tracing + OTLP exporter IF any of
+        // ARISTA_MCP__Otel__Endpoint or OTEL_EXPORTER_OTLP_ENDPOINT is set.
+        // Otherwise a no-op — zero allocations, zero exporter threads.
+        services.AddOtelIfEnabled();
 
         return services;
     }

@@ -1,0 +1,27 @@
+# Optional observability stack for arista-mcp.
+#
+# Brings up Jaeger's all-in-one image with the OTLP receiver on :4317 (gRPC)
+# and :4318 (HTTP). Use alongside docker/compose.yaml:
+#
+#   podman compose -f docker/compose.yaml -f docker/compose.otel.yaml up -d
+#
+# Then run serve with:
+#
+#   ARISTA_MCP__Otel__Endpoint=http://localhost:4317 \
+#     dotnet run --project src/AristaMcp.Cli -- serve --transport http --port 8080
+#
+# Open http://localhost:16686 → Service: arista-mcp → Find Traces.
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.65.0
+    container_name: arista-mcp-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      # 16686: Jaeger UI
+      - "0.0.0.0:16686:16686"
+      # 4317: OTLP gRPC (default OpenTelemetry .NET transport)
+      - "0.0.0.0:4317:4317"
+      # 4318: OTLP HTTP/protobuf
+      - "0.0.0.0:4318:4318"
