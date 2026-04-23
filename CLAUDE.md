@@ -162,6 +162,35 @@ Sprint N+1 until Sprint N's gate passes and `git tag sprint-N-review` exists.
 - **AsyncFixer 2.1.0** active; no new warnings surfaced on the existing codebase
   (zero suppressions anywhere in `src/`).
 
+## Sprint 8 code-review follow-ups (open, non-blocker)
+
+Audited by the code-reviewer agent after Sprint 8 landed. Fixed items are
+in `git log` (commits `6429cd2`, `2122560`). Items deferred:
+
+- **IngestService partial sub-batch failure** — pre-existing (not
+  introduced in 8.2): if chunk N/M fails, doc is upserted with correct
+  `pdf_sha256` but chunks are partial (0..N-1). Next `ingest` without
+  `--force` skips via the sha-match early-exit. Manifests as silent
+  under-indexed doc. Fix path: defer `docRepo.UpsertAsync` until AFTER
+  the last sub-batch commits, OR add a `ResetPdfSha256Async` in the
+  catch block. Not yet done because pre-v0.1.4 tests all pass and
+  real-world sub-batch failures are rare.
+- **QueryEmbeddingCache eviction under concurrent writes**: `Add` does
+  check-then-evict non-atomically. Bounded overshoot (~N for N concurrent
+  searchers). Acceptable at capacity=256; do NOT scale past ~4 k without
+  replacing the evict strategy with `Interlocked.Increment` + CAS.
+- **TripleCurator null-product negatives**: `ProductMatches(null, x)`
+  returns false, so null-product chunks pass the cross-product filter
+  regardless of the positive's product. Only affects `curate-triples`
+  output quality for hardware/aboot/cva/cvw queries where positive
+  product is null. Impact: fewer truly-hard negatives in Sprint 9 data.
+- **Placeholder body-char threshold = 40** is tight. A real one-section
+  stub doc with body < 40 chars would be silently skipped. No such doc
+  exists in the current catalog; raise to 100 if one appears.
+- **OtelConfig env-var TOCTOU**: `IsEnabled()` reads vars; the builder
+  reads them again. Theoretical race in multi-threaded test code
+  only — env vars are stable in production serve/CLI paths.
+
 ## Sprint 8 additions (v0.1.4 in-progress)
 
 - **Postgres memory knobs are 3 pieces, not 1.** compose.yaml command-line,
