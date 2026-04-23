@@ -133,6 +133,74 @@ public class IngestServiceTest(PgvectorFixture fx)
     }
 
     [Fact]
+    public async Task PlaceholderDoc_StartsWithFakeConversionHeading_IsSkipped()
+    {
+        // Sprint 8-post-mortem canary: upstream arista-docs used to stamp
+        // placeholder MD as convert_mode="accurate" and ingest would happily
+        // chunk "Fake conversion of X.pdf\n\n<N> bytes." into the BM25 index,
+        // where it matched every query that shared a subword. The defensive
+        // filter in IngestService.IngestDocumentAsync now catches this at the
+        // title level. This test locks that in.
+        await fx.ResetAsync();
+
+        using var builder = new FakeCatalogBuilder();
+        // Exact shape FakeConverter wrote pre-fix.
+        builder.AddDoc(
+            "placeholder", "fake-doc", "Fake Doc", "sha-placeholder",
+            "# Fake conversion of fake-doc.pdf\n\n72839 bytes.\n");
+        builder.AddDoc(
+            "real", "real-doc", "Real Doc", "sha-real", BuildMarkdown(1));
+        var catalogPath = builder.Build();
+
+        await using var ctx = fx.CreateContext();
+        var service = MakeService(fx, ctx);
+
+        var result = await service.IngestAsync(
+            new IngestOptions { CatalogPath = catalogPath, Force = true },
+            NullIngestProgress.Instance,
+            CancellationToken.None);
+
+        // Placeholder doesn't upsert; real doc does.
+        result.DocsUpserted.Should().Be(1, "real-doc produced chunks, placeholder was skipped");
+
+        // The literal BM25-poisoning phrase must not appear in any chunk row.
+        await using var conn = await fx.DataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM chunks WHERE content LIKE 'Fake conversion of%'";
+        var leaked = (long?)await cmd.ExecuteScalarAsync() ?? -1;
+        leaked.Should().Be(0, "defensive filter must drop the FakeConverter heading before BulkInsert");
+    }
+
+    [Fact]
+    public async Task PlaceholderDoc_BelowBodyCharThreshold_IsSkipped()
+    {
+        // Signature-agnostic fallback: even if a future arista-docs placeholder
+        // format avoids the "Fake conversion of" prefix, a sum of section-body
+        // text below 40 chars is still a strong placeholder signal. This test
+        // pins the body-size gate.
+        await fx.ResetAsync();
+
+        using var builder = new FakeCatalogBuilder();
+        // 30 chars of body — below the 40-char gate. Title DOESN'T match the
+        // fake-prefix filter, so this exercises the second gate.
+        builder.AddDoc(
+            "tiny", "tiny-doc", "Tiny Doc", "sha-tiny",
+            "# Something Unrelated\n\ntiny thirty chars body\n");
+        var catalogPath = builder.Build();
+
+        await using var ctx = fx.CreateContext();
+        var service = MakeService(fx, ctx);
+
+        var result = await service.IngestAsync(
+            new IngestOptions { CatalogPath = catalogPath, Force = true },
+            NullIngestProgress.Instance,
+            CancellationToken.None);
+
+        result.DocsUpserted.Should().Be(0, "body < 40 chars — placeholder gate trips");
+        result.ChunksUpserted.Should().Be(0);
+    }
+
+    [Fact]
     public async Task SubBatching_SplitsHugeDocIntoMultipleInserts_FinalChunkCountStable()
     {
         // Sprint 8.2 canary: when a doc produces more chunks than
