@@ -52,12 +52,26 @@ Sprint 8 — unblock full-corpus bench + prep GPU fine-tune pipeline.
   a volume wipe doesn't re-clamp to 2 GB. HNSW rebuild + bm25v trigger at
   full-corpus scale no longer OOM-kill the container.
 
+### Observability
+
+- **`System.Diagnostics.ActivitySource` hooks** on the retrieval + ingest
+  hot paths. Source name `AristaMcp`, spans `search.hybrid` (root),
+  `search.embed`, `search.dense`, `search.sparse`, `search.rerank`,
+  `ingest.document`, `ingest.subbatch`. Zero-cost when no listener is
+  registered. OTLP/Jaeger exporter wiring is an out-of-process concern
+  — consumer registers the source in their host. No NuGet additions.
+
 ### Deferred to future sprint
 
 - **Full-corpus re-ingest + `v0.1.4-full-corpus-crlf` bench row** —
-  kicked off but dominated by EOS-User-Manual's 40 k chunks; doesn't
-  fit in one session. Resumes on next run via per-doc `pdf_sha256` skip.
-- **Structured logging + OTEL traces/metrics** — deferred to v0.1.5.
+  ingest kicked off but dominated by EOS-User-Manual's ~40 k chunks;
+  doesn't fit in one session. Resumes on next `ingest --force` via
+  per-doc `pdf_sha256` skip. Once complete, run
+  `arista-mcp bench --history tests/fixtures/bench-history.jsonl --label v0.1.4-full-corpus-crlf`.
+- **OTLP exporter registration + Jaeger smoke test** — spans emit but
+  no exporter is wired in-tree. Consumer adds
+  `OpenTelemetry.Exporter.OpenTelemetryProtocol` + registers
+  `"AristaMcp"` as a source in host startup.
 
 ## [v0.1.3] — 2026-04-22
 

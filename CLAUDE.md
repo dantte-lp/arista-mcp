@@ -198,6 +198,12 @@ Sprint N+1 until Sprint N's gate passes and `git tag sprint-N-review` exists.
   doc AND product (same-product negatives collapse cross-encoder margin
   loss). Will produce fewer triples than (queries × negatives) on corpora
   with limited product diversity.
+- **ActivitySource `"AristaMcp"`** is the stable telemetry contract.
+  Uses `System.Diagnostics.ActivitySource` directly — no OpenTelemetry
+  package dep inside AristaMcp.* projects. To export: register the source
+  by name in the host process. Renaming the source or any
+  `AristaActivity.Operations.*` constant is a breaking schema change for
+  downstream dashboards.
 
 ## Sprint 7 additions (v0.1.3)
 
