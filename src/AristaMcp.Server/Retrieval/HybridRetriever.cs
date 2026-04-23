@@ -89,10 +89,15 @@ public sealed class HybridRetriever(
         outerSpan?.SetTag(AristaActivity.Tags.RerankAdaptive, rerankTopN < options.RerankTopN);
 
         var rerankSw = Stopwatch.StartNew();
-        using var rerankSpan = AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchRerank);
-        var rerankInput = topForRerank.Select(f => new RerankCandidate(f.Row.ChunkId, f.Row.Content)).ToList();
-        var rerankResults = await reranker.RerankAsync(expansion.Expanded, rerankInput, ct).ConfigureAwait(false);
-        rerankSpan?.Dispose();
+        IReadOnlyList<RerankResult> rerankResults;
+        // Span closes when the scope block exits; do NOT also call Dispose()
+        // explicitly — Activity.Dispose internally re-Stop()s and corrupts the
+        // span end timestamp. (Sprint 8 audit finding.)
+        using (AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchRerank))
+        {
+            var rerankInput = topForRerank.Select(f => new RerankCandidate(f.Row.ChunkId, f.Row.Content)).ToList();
+            rerankResults = await reranker.RerankAsync(expansion.Expanded, rerankInput, ct).ConfigureAwait(false);
+        }
         rerankSw.Stop();
 
         var rerankScore = rerankResults.ToDictionary(r => r.ChunkId, r => r.Score);
