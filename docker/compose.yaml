@@ -20,15 +20,20 @@ services:
       - "0.0.0.0:5434:5432"
     volumes:
       - arista-pgdata:/var/lib/postgresql/18/data
+    # Memory sized for the post-CRLF-fix corpus scale (~40 k chunks from
+    # EOS-User-Manual alone, ~50 k across 2.4 k docs). The pre-v0.1.4
+    # 512 MB / 32 MB config OOM-killed during HNSW rebuild + bm25v trigger
+    # spike. Rationale for each knob in CLAUDE.md Sprint 8 additions.
     command: >-
       postgres
       -c shared_preload_libraries=vector,vchord,vchord_bm25,pg_tokenizer
-      -c max_connections=50
-      -c shared_buffers=512MB
-      -c effective_cache_size=2GB
-      -c work_mem=32MB
-      -c maintenance_work_mem=2GB
-      -c wal_buffers=16MB
+      -c max_connections=20
+      -c shared_buffers=2GB
+      -c effective_cache_size=8GB
+      -c work_mem=256MB
+      -c maintenance_work_mem=4GB
+      -c max_wal_size=4GB
+      -c wal_buffers=64MB
       -c io_method=worker
       -c io_workers=3
     healthcheck:

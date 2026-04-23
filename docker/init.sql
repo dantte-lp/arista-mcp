@@ -18,7 +18,11 @@ BEGIN
     EXECUTE format('ALTER DATABASE %I SET hnsw.iterative_scan = %L', db, 'relaxed_order');
     EXECUTE format('ALTER DATABASE %I SET hnsw.max_scan_tuples = 20000', db);
     EXECUTE format('ALTER DATABASE %I SET hnsw.ef_search = 100', db);
-    EXECUTE format('ALTER DATABASE %I SET maintenance_work_mem = %L', db, '2GB');
+    -- Matches compose.yaml command-line. HNSW rebuild during bulk ingest is the
+    -- biggest memory spike (Sprint 8 note, post-CRLF-fix corpus ~40 k chunks for
+    -- EOS-User-Manual alone). Keep the two in sync; raising here w/o raising
+    -- compose.yaml's shared_buffers envelope risks OOM on the container.
+    EXECUTE format('ALTER DATABASE %I SET maintenance_work_mem = %L', db, '4GB');
     EXECUTE format('ALTER DATABASE %I SET jit = off', db);
 END $$;
 
