@@ -162,6 +162,29 @@ Sprint N+1 until Sprint N's gate passes and `git tag sprint-N-review` exists.
 - **AsyncFixer 2.1.0** active; no new warnings surfaced on the existing codebase
   (zero suppressions anywhere in `src/`).
 
+## Sprint 7 additions (v0.1.3)
+
+- **CRLF in MD files is the default** (arista-docs is converted on Windows). Any
+  regex with `$` in Multiline mode needs CRLF→LF normalisation first, otherwise
+  it silently matches zero headings. Verify new regex-driven code against
+  `tests/…/MarkdownWithCrlfLineEndings_*` — it's the regression canary.
+- **Heading levels diverge between MD and JSON.** `arista-docs.enrich` emits
+  every TOC entry as `level=1`; MD keeps real `#`/`##`/`###` depth. NEVER key the
+  MD↔JSON pairing on level. Current algorithm: cleaned-title sequence with
+  lookahead window = 3. See `StampPagesFromJson` in `DocumentLoader.cs`.
+- **Bench curation — use `expect_product` when slugs are model numbers.**
+  Products `hardware`, `aboot`, `cva`, `cvw` (and anything else with slug like
+  `7050X3-Datasheet` or `21630-*-…`) will never hit via substring tokens. Direct
+  `ChunkResult.Product` equality is the only reliable match.
+- **`BenchRow.expect_any` and `expect_product` are OR'd.** A query with both
+  passes when EITHER the product matches OR any slug/title substring hits. Keep
+  `expect_any` populated for semantic-match canaries even when `expect_product`
+  is the primary gate.
+- **Full-corpus ingest is memory-hostile post-v0.1.3.** CRLF fix means 3× more
+  chunks per doc; EOS-User-Manual alone generates ~40 k chunks and the postgres
+  container OOMs around that scale. Short-term: ingest `--category manual` for
+  testing. Sprint 8 tunes memory + may split EOS across multiple ingest_runs.
+
 ## Sprint 6 additions (v0.1.2)
 
 - **Integration tests run against `arista_test`, not `arista`.** `PgvectorFixture`

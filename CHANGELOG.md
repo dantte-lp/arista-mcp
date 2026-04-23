@@ -3,6 +3,59 @@
 All notable changes to arista-mcp are documented here. Format follows
 [keep-a-changelog](https://keepachangelog.com); dates use ISO-8601.
 
+## [v0.1.3] — 2026-04-22
+
+Sprint 7 — retrieval quality: heading/page-number bug hunt + bench curation.
+
+### Fixed
+
+- **Latent CRLF heading regex bug (Sprint 2 regression).** `.NET` regex `$` in
+  Multiline mode matches only before `\n`, never at `\r`. Windows-written MD files
+  with CRLF endings made every ATX heading fail the regex, so each doc silently
+  collapsed into a single fallback-titled section — sectioning and page-enrichment
+  never worked on the real corpus. The fix normalises `\r\n`/`\r` → `\n` before
+  `HeadingRegex.Matches()`. Covered by a new `MarkdownWithCrlfLineEndings_*` test;
+  prior unit tests used raw-string literals (LF-only) and missed this completely.
+  Impact: per-doc page coverage jumped from 0/N to mostly-100% on real MDs
+  (157/181 docs fully paged in the partial v0.1.3 ingest).
+- **`StampPagesFromJson` level mismatch.** `arista-docs.enrich.build_sections`
+  flattens every TOC entry to `level=1`, while the MD walker reads real
+  `#`/`##`/`###` depth. The old `(level, title)` key pairing dropped ~28 % of
+  chunks to null pages even when titles matched perfectly. New algorithm pairs by
+  cleaned title order with a lookahead-3 window; levels are ignored.
+
+### Added
+
+- **`BenchmarkQuery.expect_product`** field — exact match on `ChunkResult.Product`.
+  Products like `hardware` / `aboot` / `cva` / `cvw` use model-number slugs
+  (`7050X3-Datasheet`, `21630-aboot-measured-boot-6-0-0`) that no substring token
+  in slug/title can catch. The four Sprint 5 bench misses ship as retrieval wins,
+  not curation bugs.
+- **Bench set expanded 30 → 111 queries** spread across the catalog's product
+  distribution (eos 23, cvp 12, dmf 8, hardware 8, cv-cue 6, cvw 6, cva 3, mss 3,
+  cloudeos 3, aboot 2, velocloud 2, avd/campus/analytics 1 each, plus 32 general
+  / cross-product). 3-point-percentage regressions are now detectable.
+- **`search_docs --dedup-per-section` flag.** When set, drops lower-scored
+  duplicate chunks from the same `(document_id, section_title)` post-rerank,
+  yielding more diverse top-K when a long section dominates dense retrieval.
+- **AsyncFixer 1.6.0 → 2.1.0** (Sprint 7.5 early) — no new warnings surfaced;
+  zero suppressions required across `src/`.
+
+### Bench history
+
+- `v0.1.3-crlf-fix-181docs-partial`: 111 queries, top-1 36.9 %, top-10 67.6 %, p50
+  1394 ms, p95 1909 ms. Partial ingest — EOS-User-Manual's ~17k sections now
+  generate ~3× more chunks post-CRLF-fix, pushing postgres past our current
+  resource envelope. **Full-corpus re-bench deferred to Sprint 8** which will
+  tune memory (shared_buffers / work_mem) + possibly chunk EOS as a second-pass.
+
+### Deferred to Sprint 8
+
+- Full-corpus ingest under expanded chunk scale (~30–40 k chunks vs the old 9 569).
+- `bench --history` plotting / regression gate in CI.
+- CPU-only latency optimisations (fp16 embedder, query LRU, adaptive rerank cap,
+  warm-on-startup) — same target as original Sprint 7.3: p95 ≤ 1.2 s.
+
 ## [v0.1.2] — 2026-04-21
 
 Sprint 6 — test-DB isolation + full-corpus baseline.
