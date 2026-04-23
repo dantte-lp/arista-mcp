@@ -24,6 +24,16 @@ public sealed class HybridRetriever(
     IReranker reranker,
     NpgsqlDataSource dataSource) : IHybridRetriever
 {
+    // Size is deliberately small — retrieval workloads have tight hot-sets
+    // (top ~100 Claude-issued queries per session). Larger just wastes RAM.
+    private readonly QueryEmbeddingCache _queryCache = new(capacity: 256);
+
+    // Below this RRF-score spread between top-1 and top-5, the rerank signal
+    // is noise — we cap rerank work to AdaptiveRerankFloor to save ~50 ms/query.
+    // Tuned empirically on v0.1.3 bench history; revisit if rerank model changes.
+    private const float AdaptiveSpreadThreshold = 0.02f;
+    private const int AdaptiveRerankFloor = 10;
+
     public async Task<SearchResponse> SearchAsync(
         string query,
         RetrievalOptions options,
@@ -36,10 +46,20 @@ public sealed class HybridRetriever(
         var expansion = QueryExpander.Expand(query);
 
         var embedSw = Stopwatch.StartNew();
-        var qVecs = await embedder.EmbedAsync([expansion.Expanded], isQuery: true, ct).ConfigureAwait(false);
+        HalfVector qVec;
+        if (_queryCache.TryGet(expansion.Expanded, out var cached))
+        {
+            qVec = cached;
+        }
+        else
+        {
+            var qVecs = await embedder.EmbedAsync(
+                [expansion.Expanded], isQuery: true, ct).ConfigureAwait(false);
+            Half[] halfArr = [.. qVecs[0].Select(static f => (Half)f)];
+            qVec = new HalfVector(halfArr);
+            _queryCache.Add(expansion.Expanded, qVec);
+        }
         embedSw.Stop();
-        Half[] halfArr = [.. qVecs[0].Select(static f => (Half)f)];
-        var qVec = new HalfVector(halfArr);
 
         var denseTask = RunDenseAsync(qVec, options, ct);
         var sparseTask = RunSparseAsync(expansion.Expanded, options, ct);
@@ -51,7 +71,9 @@ public sealed class HybridRetriever(
         var fused = ReciprocalRankFusion(denseRows, sparseRows, options.RrfK);
         rrfSw.Stop();
 
-        var topForRerank = fused.Take(options.RerankTopN).ToList();
+        // Adaptive rerank: tight-cluster top-5 = rerank signal is noise, cap to floor.
+        var rerankTopN = ComputeAdaptiveRerankTopN(fused, options.RerankTopN);
+        var topForRerank = fused.Take(rerankTopN).ToList();
         var rerankSw = Stopwatch.StartNew();
         var rerankInput = topForRerank.Select(f => new RerankCandidate(f.Row.ChunkId, f.Row.Content)).ToList();
         var rerankResults = await reranker.RerankAsync(expansion.Expanded, rerankInput, ct).ConfigureAwait(false);
@@ -176,6 +198,22 @@ public sealed class HybridRetriever(
         }
 
         return rows;
+    }
+
+    // If the top-5 RRF scores are within AdaptiveSpreadThreshold, candidates
+    // are effectively tied and sending 30 of them to the cross-encoder is
+    // wasted compute — the reranker will assign near-equal scores and the
+    // RRF order survives. Cap to AdaptiveRerankFloor (10) in that case.
+    private static int ComputeAdaptiveRerankTopN(List<FusedCandidate> fused, int configured)
+    {
+        if (fused.Count < 5 || configured <= AdaptiveRerankFloor)
+        {
+            return configured;
+        }
+        var top1 = fused[0].RrfScore;
+        var top5 = fused[4].RrfScore;
+        var spread = top1 - top5;
+        return spread > AdaptiveSpreadThreshold ? configured : AdaptiveRerankFloor;
     }
 
     private static List<FusedCandidate> ReciprocalRankFusion(

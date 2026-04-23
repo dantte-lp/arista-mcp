@@ -4,6 +4,7 @@ using System.Text.Json;
 using AristaMcp.Cli.Benchmarks;
 using AristaMcp.Cli.Configuration;
 using AristaMcp.Core.Retrieval;
+using AristaMcp.Core.Settings;
 using AristaMcp.Data;
 using AristaMcp.Embedding;
 using AristaMcp.Server.Retrieval;
@@ -84,9 +85,13 @@ public static class BenchCommand
         }
 
         var settings = CliConfiguration.Load();
-        var modelsDir = modelsOverride?.FullName ?? settings.ModelsDir;
-        var embedderModel = Path.Combine(modelsDir, "embedder", "model.onnx");
-        var embedderVocab = Path.Combine(modelsDir, "embedder", "vocab.txt");
+        if (modelsOverride is not null)
+        {
+            settings.ModelsDir = modelsOverride.FullName;
+        }
+        var modelsDir = settings.ModelsDir;
+        var embedderModel = ModelPaths.EmbedderModel(settings);
+        var embedderVocab = ModelPaths.EmbedderVocab(settings);
         if (!File.Exists(embedderModel) || !File.Exists(embedderVocab))
         {
             console.MarkupLine($"[red]error[/] embedder model missing at {Markup.Escape(modelsDir)}/embedder");

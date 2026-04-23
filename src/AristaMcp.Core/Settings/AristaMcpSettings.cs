@@ -13,6 +13,13 @@ public sealed class AristaMcpSettings
     public string ModelsDir { get; set; } = "models";
     public string EmbeddingModel { get; set; } = "snowflake-arctic-embed-m-v1.5";
     public int EmbeddingDim { get; set; } = 768;
+
+    // Embedder weight precision. "fp32" (default) uses `models/embedder/model.onnx`
+    // (~436 MB). "fp16" uses `models/embedder/model_fp16.onnx` (~218 MB) for
+    // 1.5-2x CPU speedup at <= 1 pp nDCG@10 cost per Snowflake's card. Set via
+    // ARISTA_MCP__EmbeddingVariant=fp16 when latency matters.
+    public string EmbeddingVariant { get; set; } = "fp32";
+
     public string RerankerModel { get; set; } = "bge-reranker-base";
     public bool Gpu { get; set; }
     public McpTransport Transport { get; set; } = McpTransport.Stdio;

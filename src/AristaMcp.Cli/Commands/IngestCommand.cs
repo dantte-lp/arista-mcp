@@ -3,6 +3,7 @@ using AristaMcp.Cli.Configuration;
 using AristaMcp.Cli.Ingest;
 using AristaMcp.Cli.Progress;
 using AristaMcp.Core.Chunking;
+using AristaMcp.Core.Settings;
 using AristaMcp.Data;
 using AristaMcp.Data.Repositories;
 using AristaMcp.Embedding;
@@ -69,7 +70,11 @@ public static class IngestCommand
     private static async Task<int> RunAsync(IngestOptions opts, DirectoryInfo? modelsOverride, CancellationToken ct)
     {
         var settings = CliConfiguration.Load();
-        var modelsDir = modelsOverride?.FullName ?? settings.ModelsDir;
+        if (modelsOverride is not null)
+        {
+            settings.ModelsDir = modelsOverride.FullName;
+        }
+        var modelsDir = settings.ModelsDir;
 
         var console = AnsiConsole.Console;
         console.MarkupLine($"[bold]arista-mcp ingest[/]");
@@ -82,8 +87,8 @@ public static class IngestCommand
             console.MarkupLine($"  category  [grey]{Markup.Escape(opts.Category)}[/]");
         }
 
-        var modelPath = Path.Combine(modelsDir, "embedder", "model.onnx");
-        var vocabPath = Path.Combine(modelsDir, "embedder", "vocab.txt");
+        var modelPath = ModelPaths.EmbedderModel(settings);
+        var vocabPath = ModelPaths.EmbedderVocab(settings);
 
         if (!opts.DryRun && (!File.Exists(modelPath) || !File.Exists(vocabPath)))
         {

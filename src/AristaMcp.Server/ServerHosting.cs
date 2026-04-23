@@ -34,7 +34,7 @@ public static class ServerHosting
             o.UseNpgsql(ds, n => n.UseVector());
         });
 
-        services.AddSingleton<IEmbedder>(_ => BuildEmbedder(settings));
+        services.AddSingleton<IEmbedder>(_ => BuildAndWarmEmbedder(settings));
         services.AddSingleton<IReranker>(_ => BuildReranker(settings));
 
         services.AddScoped<IDocumentRepository, DocumentRepository>();
@@ -72,13 +72,36 @@ public static class ServerHosting
 
     private static OnnxEmbedder BuildEmbedder(AristaMcpSettings settings)
     {
-        var modelPath = Path.Combine(settings.ModelsDir, "embedder", "model.onnx");
-        var vocabPath = Path.Combine(settings.ModelsDir, "embedder", "vocab.txt");
         return new OnnxEmbedder(new EmbeddingOptions
         {
-            ModelPath = modelPath,
-            VocabPath = vocabPath,
+            ModelPath = ModelPaths.EmbedderModel(settings),
+            VocabPath = ModelPaths.EmbedderVocab(settings),
             Gpu = settings.Gpu,
         });
+    }
+
+    // Sprint 8.4d: warm the ONNX session during DI resolution so the first real
+    // request doesn't pay the ~200 ms graph-init cost. Blocking .GetAwaiter().
+    // GetResult() is intentional — the container expects AddSingleton factories
+    // to return eagerly, and the cost is a one-time hit during host startup.
+    private static OnnxEmbedder BuildAndWarmEmbedder(AristaMcpSettings settings)
+    {
+        var embedder = BuildEmbedder(settings);
+        try
+        {
+            _ = embedder.EmbedAsync(["warmup"], isQuery: false, CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            // Warm-up failure should not block host startup — the real request
+            // will surface whatever underlying error this hit (model missing,
+            // GPU disabled, etc.) with a proper exception path. Swallowing
+            // here keeps a malformed environment from looking "hung".
+            // OOM/stack overflow still propagate — those are not recoverable.
+            System.Diagnostics.Debug.WriteLine(
+                $"[arista-mcp] embedder warm-up failed (non-fatal): {ex.Message}");
+        }
+        return embedder;
     }
 }
