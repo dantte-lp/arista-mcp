@@ -1,7 +1,70 @@
 # Changelog
 
-All notable changes to arista-mcp are documented here. Format follows
-[keep-a-changelog](https://keepachangelog.com); dates use ISO-8601.
+All notable changes to this project are documented here.
+
+The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
+Dates use ISO-8601.
+
+## [Unreleased]
+
+Work toward v0.3.0 — lift top-1 on the 588-query v2 bench from the
+90.82 % stock MiniLM baseline to ≥ 95 % while staying CPU-only.
+Plan: [`docs/superpowers/plans/2026-04-24-arista-mcp-retrieval-quality-v0.3-revised.md`](docs/superpowers/plans/2026-04-24-arista-mcp-retrieval-quality-v0.3-revised.md).
+
+### Added
+
+- **XLM-RoBERTa reranker family** — `XlmRobertaOnnxReranker` +
+  `XlmRobertaRerankerTokenizer`. SentencePiece BPE tokeniser with the
+  fairseq-offset remap (SP id 0 → HF 3, else sp + 1); byte-for-byte
+  parity with HuggingFace `XLMRobertaTokenizer`. Enables future
+  experiments with `bge-reranker-v2-m3` without touching the BERT
+  WordPiece path.
+- **`RerankerFamilyDetector`** auto-selects the reranker implementation
+  by probing files under `models/reranker/`. `sentencepiece.bpe.model`
+  triggers the XLM-R path; `vocab.txt` triggers the BERT path; neither
+  falls back to `NoopReranker`.
+- **HyDE query rewriting** — `IHydeExpander`, `HydeExpander`,
+  `NoopHydeExpander`, `HydeSettings`. Optional local-LLM rewriter
+  (llama.cpp sidecar behind `podman compose --profile llm up`) that
+  feeds the dense-retrieval path only; BM25 and reranker continue to
+  operate on the raw query. Off by default; opt-in via
+  `ARISTA_MCP__Hyde__Enabled=true`.
+- **Bench harness v2** (588 chunk-ID multi-positive queries at
+  `tests/fixtures/bench-queries-v2.json`). LLM-generated queries
+  stratified across 15 product families, fairness-filtered through the
+  current retriever, multi-positive annotated by a second LLM pass.
+- **`arista-mcp validate-bench-queries`** CLI subcommand — runs a
+  candidate JSONL through `HybridRetriever` and keeps rows whose source
+  chunk appears in the top-K. Used by the bench-expansion pipeline.
+- **`BenchmarkQuery.ExpectAnyOfChunkIds`** and
+  **`BenchmarkQuerySet.Version`** fields; v2 bench scoring is pure
+  chunk-ID membership and overrides the v1 slug / title substring
+  heuristic when populated.
+- **`SearchDiagnostics` HyDE fields** — `HydeMs`, `HydeHit`,
+  `HydeFallback`. Backwards-compatible (all default to zero / false).
+- **Multilingual documentation** under `docs/en/` and `docs/ru/` with
+  Mermaid architecture / retrieval / ingest diagrams.
+
+### Changed
+
+- `BenchCommand` writes `query_set_version` into every
+  `bench-history.jsonl` row so v1 and v2 rows are distinguishable.
+- `HybridRetriever` ctor now accepts an optional `IHydeExpander` and
+  falls back to `NoopHydeExpander` when absent; pre-HyDE callers keep
+  compiling unchanged.
+- `fetch-models.ps1` pulls the `Qwen/Qwen2.5-1.5B-Instruct` Q4_K_M GGUF
+  into `models/llm/` for the HyDE sidecar.
+
+### Research outcomes retained for provenance
+
+- **bge-reranker-base** (v0.2.2 probe) — top-1 regressed by 3.75 pp vs
+  the MiniLM baseline on the v2 bench, with 2× CPU latency. Code path
+  kept for the eventual `bge-reranker-v2-m3` fine-tune; stock default
+  remains MiniLM-L6-v2.
+- **HyDE with Qwen2.5-1.5B / 3B** (v0.2.3 probe) — top-1 regressed by
+  4.60 pp on v2 and dropped top-10 from 100 % to 96.94 %. Code ships as
+  `Enabled=false` default.
 
 ## [v0.1.4] — 2026-04-23
 
@@ -353,3 +416,12 @@ Npgsql.EFCore 9.0.4 · Pgvector.EFCore 0.3.0 · Microsoft.ML.OnnxRuntime 1.24.4 
 Microsoft.ML.Tokenizers 2.0.0 · System.CommandLine 2.0.6 · Spectre.Console 0.55.2 ·
 xUnit 2.9.3 · FluentAssertions 8.9.0 · PostgreSQL 18 + pgvector 0.8.2 + vchord 1.1.1 +
 vchord_bm25 0.3.0 + pg_tokenizer 0.1.1.
+
+---
+
+[Unreleased]: https://github.com/dantte-lp/arista-mcp/compare/v0.1.4...HEAD
+[v0.1.4]: https://github.com/dantte-lp/arista-mcp/compare/v0.1.3...v0.1.4
+[v0.1.3]: https://github.com/dantte-lp/arista-mcp/compare/v0.1.2...v0.1.3
+[v0.1.2]: https://github.com/dantte-lp/arista-mcp/compare/v0.1.1...v0.1.2
+[v0.1.1]: https://github.com/dantte-lp/arista-mcp/compare/v0.1.0...v0.1.1
+[v0.1.0]: https://github.com/dantte-lp/arista-mcp/releases/tag/v0.1.0

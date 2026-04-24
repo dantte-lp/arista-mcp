@@ -1,152 +1,155 @@
 # arista-mcp
 
-**Hybrid retrieval MCP server for Arista documentation.** .NET 10 · ModelContextProtocol 1.2 · PostgreSQL 18 with pgvector + vchord_bm25 · ONNX Runtime.
+Hybrid retrieval MCP server for Arista documentation.
 
-Consumes the catalog produced by [`arista-docs`](../arista-docs) (MD + per-doc JSON) and serves it to Claude or any MCP client via five tools (`search_docs`, `lookup_section`, `list_documents`, `get_document`, `get_status`). Runs over stdio (for Claude Desktop / Claude Code) or Streamable HTTP.
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=.net)](https://dotnet.microsoft.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![pgvector](https://img.shields.io/badge/pgvector-0.8.2-336791)](https://github.com/pgvector/pgvector)
+[![ONNX Runtime](https://img.shields.io/badge/ONNX_Runtime-1.24-005CED)](https://onnxruntime.ai/)
+[![MCP](https://img.shields.io/badge/MCP-1.2-blueviolet)](https://modelcontextprotocol.io/)
+[![License](https://img.shields.io/badge/license-TBD-lightgrey)](#license)
 
-Retrieval is dense (snowflake-arctic-embed-m-v1.5, halfvec(768), HNSW `halfvec_cosine_ops`) × sparse (vchord_bm25 with a custom-model tokenizer) fused via Reciprocal Rank Fusion (k=60) and reranked with a BERT cross-encoder (ms-marco-MiniLM-L6-v2). Queries get Arista acronym annotations (EVPN → "Ethernet VPN", MLAG → "Multi-chassis Link Aggregation", …) before embedding.
+**[English docs](docs/en/) · [Документация на русском](docs/ru/) · [Changelog](CHANGELOG.md)**
 
 ---
 
-## Requirements
+`arista-mcp` consumes the catalog produced by [`arista-docs`](https://github.com/dantte-lp/arista-docs)
+(Markdown + per-document JSON) and serves it to Claude or any MCP client via
+five tools — `search_docs`, `lookup_section`, `list_documents`, `get_document`,
+`get_status`. Runs over stdio (Claude Desktop / Claude Code) or Streamable HTTP.
 
-- **.NET SDK 10.0.201+** (pinned via `global.json`)
-- **Podman** with `podman compose` (or Docker Compose v2) on WSL2 or native Linux
-- **PowerShell 7+** (for `scripts/fetch-models.ps1`; bash port is straightforward)
-- ~**5 GB disk** — models (~530 MB), PostgreSQL data (~1–3 GB for full catalog), build artifacts
-- Optional: CUDA 12+ if you want `--gpu` embedding acceleration
+Retrieval is a three-stage pipeline: **dense** (`snowflake-arctic-embed-m-v1.5`
+through ONNX Runtime, `halfvec(768)`, HNSW `halfvec_cosine_ops`) and **sparse**
+(`vchord_bm25` with a custom-model tokenizer) run in parallel, fuse via
+**Reciprocal Rank Fusion** at k = 60, then the top-N are **reranked** by a
+BERT cross-encoder (`ms-marco-MiniLM-L6-v2`). Queries get Arista acronym
+annotations before embedding.
 
-## Quickstart
+## Architecture at a glance
 
-    # 1. Bring up PostgreSQL 18 with pgvector + vchord_bm25 + pg_tokenizer
-    podman compose -f docker/compose.yaml up -d postgres
+```mermaid
+flowchart LR
+  subgraph clients["MCP clients"]
+    claude[Claude Desktop / Code]
+    http[HTTP caller]
+  end
 
-    # 2. Download the ONNX models (~530 MB)
-    pwsh scripts/fetch-models.ps1
+  subgraph server["arista-mcp"]
+    stdio["StdioHost<br/><i>stdin/stdout JSON-RPC</i>"]
+    httpHost["HttpHost<br/><i>Streamable HTTP /mcp</i>"]
+    tools["5 MCP tools"]
+    retriever["HybridRetriever"]
+    embedder["OnnxEmbedder<br/><i>arctic-embed-m</i>"]
+    reranker["OnnxReranker<br/><i>MiniLM-L6</i>"]
+  end
 
-    # 3. Provision the schema (documents, chunks, ingest_runs, bm25v trigger, HNSW/BM25 indexes)
-    dotnet ef database update --project src/AristaMcp.Data --startup-project src/AristaMcp.Data
+  subgraph data["PostgreSQL 18"]
+    pgv["pgvector HNSW<br/><i>halfvec(768)</i>"]
+    bm25["vchord_bm25<br/><i>tokenized column</i>"]
+  end
 
-    # 4. Ingest the arista-docs catalog (or a single category while you iterate)
-    dotnet run --project src/AristaMcp.Cli -- ingest
-    dotnet run --project src/AristaMcp.Cli -- ingest --category avd     # small test slice
-
-    # 5. Serve over stdio (Claude Desktop / Claude Code)
-    dotnet run --project src/AristaMcp.Cli -- serve --transport stdio
-
-    # …or over HTTP for local experiments
-    dotnet run --project src/AristaMcp.Cli -- serve --transport http --port 8080
-
-## Windows / Podman note
-
-Default Podman on WSL2 binds published ports at `127.0.0.1` inside the WSL VM — Windows localhost can't reach them. Either:
-
-- **One-time fix** (preferred): `podman machine stop && podman machine set --user-mode-networking && podman machine start`
-- **Or use the WSL IP**: find it with `wsl -d podman-machine-default -- ip -4 addr show eth0` and set `ARISTA_MCP__ConnectionString="Host=<wsl-ip>;Port=5434;…"` (or `ARISTA_MCP_TEST_CS` for tests).
-
-`docker/compose.yaml` already binds `0.0.0.0:5434` inside the VM so you reach it via the `vEthernet (WSL)` adapter.
-
-## Connecting MCP clients
-
-See **[`docs/mcp-integration.md`](docs/mcp-integration.md)** for full
-setup (Claude Desktop, Claude Code, raw HTTP/curl), tool schemas with
-example payloads, query patterns that work well on the Arista corpus,
-and the troubleshooting checklist.
-
-TL;DR for Claude Desktop — add to your `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "arista": {
-      "command": "dotnet",
-      "args": [
-        "run", "--project", "C:\\SHARE\\arista-mcp\\src\\AristaMcp.Cli",
-        "--no-build", "--",
-        "serve", "--transport", "stdio"
-      ]
-    }
-  }
-}
+  claude -- stdio --> stdio
+  http --> httpHost
+  stdio --> tools
+  httpHost --> tools
+  tools --> retriever
+  retriever --> embedder
+  retriever --> pgv
+  retriever --> bm25
+  retriever --> reranker
 ```
 
-For HTTP mode the client connects to `http://127.0.0.1:8080/` (MCP Streamable HTTP, stateless).
+See **[docs/en/architecture.md](docs/en/architecture.md)** for layering rules
+and detailed component / sequence diagrams.
 
-## Test / production database isolation
+## Retrieval pipeline
 
-The integration + E2E test suites provision a separate database — `arista_test` by
-default — so running `dotnet test` never TRUNCATEs your real ingest in `arista`.
-`PgvectorFixture` creates that DB on first use and refuses to run against any DB
-whose name doesn't end in `_test` (override via `ARISTA_MCP_TEST_CS` if you really
-need to). Inspect both:
+```mermaid
+flowchart LR
+  Q[query] --> QE[QueryExpander<br/><i>Arista acronyms</i>]
+  QE --> HyDE["HyDE<br/><i>opt-in, Enabled=false</i>"]
+  HyDE -- dense only --> EMB[OnnxEmbedder]
+  QE -- raw --> BM25sql[(vchord_bm25<br/>SQL)]
+  EMB --> DNSsql[(pgvector HNSW<br/>SQL)]
+  DNSsql --> RRF[Reciprocal Rank<br/>Fusion k=60]
+  BM25sql --> RRF
+  RRF -- top-N --> RR[OnnxReranker]
+  RR --> Results[ranked chunks]
+```
 
-    podman exec arista-mcp-postgres psql -U arista -d arista      -c "SELECT COUNT(*) FROM chunks;"
-    podman exec arista-mcp-postgres psql -U arista -d arista_test -c "SELECT COUNT(*) FROM chunks;"
+Deep dive in **[docs/en/retrieval.md](docs/en/retrieval.md)**.
 
-## Configuration
+## Quick start
 
-Every `AristaMcpSettings` property can be overridden by environment variable (prefix `ARISTA_MCP__`) or by an `arista-mcp.json` file in the working directory. Common overrides:
+```bash
+# 1. PostgreSQL 18 with pgvector + vchord + vchord_bm25 + pg_tokenizer
+podman compose -f docker/compose.yaml up -d postgres
 
-| Env | Default |
-|-----|---------|
-| `ARISTA_MCP__ConnectionString` | `Host=localhost;Port=5434;Database=arista;Username=arista;Password=arista` |
-| `ARISTA_MCP__ModelsDir` | `models` |
-| `ARISTA_MCP__Gpu` | `false` |
-| `ARISTA_MCP__HttpPort` | `8080` |
-| `ARISTA_MCP__IngestBatchSize` | `32` |
+# 2. ONNX models (~530 MB) + optional HyDE LLM (~1 GB Qwen2.5 GGUF)
+pwsh scripts/fetch-models.ps1
+
+# 3. Schema: documents, chunks, ingest_runs, bm25v trigger, HNSW + BM25 indexes
+dotnet ef database update --project src/AristaMcp.Data --startup-project src/AristaMcp.Data
+
+# 4. Ingest the arista-docs catalog (or a slice)
+dotnet run --project src/AristaMcp.Cli -- ingest
+dotnet run --project src/AristaMcp.Cli -- ingest --category avd  # ~2 min test slice
+
+# 5. Serve — stdio for Claude Desktop / Claude Code
+dotnet run --project src/AristaMcp.Cli -- serve --transport stdio
+
+#    ...or HTTP for local experiments
+dotnet run --project src/AristaMcp.Cli -- serve --transport http --port 8080
+```
+
+Walk-through, troubleshooting, client configs →
+**[docs/en/getting-started.md](docs/en/getting-started.md)**.
 
 ## MCP tools
 
-| Tool | Purpose |
-|------|---------|
-| `search_docs` | Hybrid search; returns ranked chunks + optional diagnostics |
-| `lookup_section` | Full text of a named section across its chunks |
-| `list_documents` | List docs filtered by category / product |
-| `get_document` | Full metadata + chunk count for one doc |
-| `get_status` | Counts + last ingest run |
+| Tool              | Purpose                                                          |
+|-------------------|------------------------------------------------------------------|
+| `search_docs`     | Hybrid search — returns ranked chunks + optional diagnostics     |
+| `lookup_section`  | Full text of a named section across its chunks                   |
+| `list_documents`  | Filter documents by category / product                           |
+| `get_document`    | Full metadata + chunk count for one document                     |
+| `get_status`      | Chunk / document counts and last ingest-run summary              |
 
-Full input schemas, example payloads, and query-pattern recommendations are in
-[`docs/mcp-integration.md`](docs/mcp-integration.md).
+Full schemas, example payloads, query patterns → **[docs/en/mcp-tools.md](docs/en/mcp-tools.md)**.
 
-## Architecture
+## CLI verbs
 
-```
-  AristaMcp.Cli ──► AristaMcp.Server ──► AristaMcp.Core
-                  ├─► AristaMcp.Embedding ─► Core
-                  └─► AristaMcp.Data      ─► Core
-```
+| Verb                      | Purpose                                                                 |
+|---------------------------|-------------------------------------------------------------------------|
+| `arista-mcp ingest`       | Chunk + embed + upsert an `arista-docs` catalog into PostgreSQL         |
+| `arista-mcp serve`        | Run the MCP server (`--transport stdio\|http`, `--port N`)              |
+| `arista-mcp bench`        | Retrieval bench with per-run JSONL history (`--history`, `--label`)     |
+| `arista-mcp curate-triples`       | Emit `(query, positive, hard-negatives)` for cross-encoder tuning |
+| `arista-mcp validate-bench-queries` | Fairness-filter LLM-generated bench queries via the retriever   |
 
-- **Core** — domain records, `IChunker`, `SectionAwareChunker`, `QueryExpander`, `IReranker`, `NoopReranker`, `CatalogReader`, `DocumentLoader`.
-- **Embedding** — `OnnxEmbedder` (snowflake-arctic-embed-m-v1.5), `OnnxReranker` (ms-marco-MiniLM-L6-v2), `BertWordPieceTokenizer`.
-- **Data** — EF Core 9 DbContext, entities, migrations, repositories, Npgsql `DataSourceFactory`.
-- **Server** — shared DI (`ServerHosting`), stdio (`StdioHost`) and HTTP (`HttpHost`) entrypoints, `HybridRetriever`, five MCP tool classes.
-- **Cli** — `System.CommandLine 2.0.6` root with `ingest`, `serve`, `bench` verbs.
+## Documentation
 
-## CLI reference
+| Doc                                                      | Audience               |
+|----------------------------------------------------------|------------------------|
+| [docs/en/architecture.md](docs/en/architecture.md)       | Component / layer map  |
+| [docs/en/retrieval.md](docs/en/retrieval.md)             | How hybrid search works end-to-end |
+| [docs/en/getting-started.md](docs/en/getting-started.md) | Hands-on setup         |
+| [docs/en/mcp-tools.md](docs/en/mcp-tools.md)             | Tool reference         |
+| [docs/en/benchmarking.md](docs/en/benchmarking.md)       | Bench v2 methodology   |
+| [docs/en/development.md](docs/en/development.md)         | Build, test, conventions |
 
-| Verb | Purpose |
-|------|---------|
-| `arista-mcp ingest` | Chunk + embed + upsert an arista-docs catalog. `--category`, `--force`, `--dry-run`, `--verbose`. |
-| `arista-mcp serve` | Run the MCP server. `--transport stdio|http`, `--port`. |
-| `arista-mcp bench` | Run the curated query set against the ingested corpus; append a row to `tests/fixtures/bench-history.jsonl` with `--history` + `--label`. |
-| `arista-mcp curate-triples` | Emit `(query, positive, hard-negatives)` JSONL for cross-encoder reranker fine-tune. See Sprint 9 plan. |
+Russian translation: **[`docs/ru/`](docs/ru/)**.
 
-## Observability
+Historical / operational notes: [`docs/mcp-integration.md`](docs/mcp-integration.md),
+[`docs/onnx-provider.md`](docs/onnx-provider.md), [`docs/otel.md`](docs/otel.md).
 
-Traces via OpenTelemetry. Opt-in — set `ARISTA_MCP__Otel__Endpoint`
-(or OTel-standard `OTEL_EXPORTER_OTLP_ENDPOINT`) to e.g.
-`http://localhost:4317` and a full span tree flows to Jaeger.
-`docker/compose.otel.yaml` brings up Jaeger locally; details in
-[`docs/otel.md`](docs/otel.md).
+## Current status
 
-## Development
-
-    dotnet build                  # clean; enforces Meziantou/Roslynator/SonarAnalyzer/Banned-API
-    dotnet test                   # unit + integration (requires the podman postgres running)
-    dotnet run --project src/AristaMcp.Cli -- bench --limit 10   # retrieval smoke over catalog
-    bash tests/e2e/03-post-reconvert-smoke.sh                    # v0.1.4 promotion gate
-
-`CLAUDE.md` has the architecture notes + gotchas (EF Core version pin, WSL port caveat, analyzer suppressions, Sprint-level additions). Sprint plans live under `docs/superpowers/plans/`.
+- **v0.1.4** shipped — stock MiniLM reranker, 111-query bench.
+- **v0.3.0 in progress** — expanded 588-query chunk-ID bench (`bench-queries-v2.json`),
+  top-1 stock baseline 90.82 %, target 95 %.
+- Plan: [`docs/superpowers/plans/2026-04-24-arista-mcp-retrieval-quality-v0.3-revised.md`](docs/superpowers/plans/2026-04-24-arista-mcp-retrieval-quality-v0.3-revised.md).
+- See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 ## License
 
