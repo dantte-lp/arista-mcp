@@ -120,6 +120,19 @@ public sealed class HydeExpander : IHydeExpander
         {
             return null;
         }
+        catch (System.Text.Json.JsonException)
+        {
+            // llama.cpp OOM or stream truncation occasionally produces
+            // 200 OK with malformed JSON — treat as any other failure
+            // (fall back to raw query, increment breaker) rather than
+            // tearing down the calling search.
+            return null;
+        }
+        catch (NotSupportedException)
+        {
+            // Content-Type mismatch from a misconfigured sidecar.
+            return null;
+        }
     }
 
     private bool IsCircuitOpen()

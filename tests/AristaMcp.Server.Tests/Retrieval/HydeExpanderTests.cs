@@ -49,6 +49,40 @@ public class HydeExpanderTests
     }
 
     [Fact]
+    public async Task FallsBackToRawQuery_OnMalformedJson()
+    {
+        // llama.cpp under memory pressure has been observed to return 200 OK
+        // with a truncated JSON body. Must degrade to the raw query instead
+        // of crashing the caller.
+        var time = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var handler = StubHandler.RespondWith(HttpStatusCode.OK, "{not actually json");
+        using var http = new HttpClient(handler);
+        var expander = new HydeExpander(http, new HydeSettings { Enabled = true }, time);
+
+        var result = await expander.ExpandAsync("EVPN overlay", CancellationToken.None);
+
+        result.DenseQuery.Should().Be("EVPN overlay");
+        result.UsedFallback.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task FallsBackToRawQuery_OnSlowServer()
+    {
+        // TimeoutMs must actually wire through CancelAfter — a hang on the
+        // sidecar side should not hang the retriever.
+        var time = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var handler = SlowHandler.HangFor(TimeSpan.FromSeconds(10));
+        using var http = new HttpClient(handler);
+        var expander = new HydeExpander(
+            http, new HydeSettings { Enabled = true, TimeoutMs = 100 }, time);
+
+        var result = await expander.ExpandAsync("EVPN overlay", CancellationToken.None);
+
+        result.DenseQuery.Should().Be("EVPN overlay");
+        result.UsedFallback.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task FallsBackToRawQuery_OnEmptyResponse()
     {
         var time = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
@@ -105,6 +139,25 @@ public class HydeExpanderTests
         result.DenseQuery.Should().Be("EVPN overlay");
         result.LatencyMs.Should().Be(0);
         result.UsedFallback.Should().BeTrue();
+    }
+
+    private sealed class SlowHandler : HttpMessageHandler
+    {
+        private readonly TimeSpan _delay;
+
+        private SlowHandler(TimeSpan delay) => _delay = delay;
+
+        public static SlowHandler HangFor(TimeSpan delay) => new(delay);
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(_delay, cancellationToken).ConfigureAwait(false);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}", Encoding.UTF8, "application/json"),
+            };
+        }
     }
 
     private sealed class StubHandler : HttpMessageHandler
