@@ -132,6 +132,48 @@ public class HydeExpanderTests
     }
 
     [Fact]
+    public async Task CircuitArms_ExactlyOnce_UnderConcurrentFailures()
+    {
+        // M1 regression guard: without CompareExchange on the cooldown write,
+        // parallel failures could each sample GetUtcNow() at slightly
+        // different instants and race to extend the cooldown window.
+        var time = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var handler = StubHandler.RespondWith(HttpStatusCode.InternalServerError, "{}");
+        using var http = new HttpClient(handler);
+        var settings = new HydeSettings
+        {
+            Enabled = true,
+            CircuitFailureThreshold = 3,
+            CircuitCooldownSeconds = 60,
+        };
+        var expander = new HydeExpander(http, settings, time);
+
+        // Fire 10 concurrent queries while the stub is returning 5xx — at
+        // least CircuitFailureThreshold of them will RecordFailure before
+        // the breaker closes further calls.
+        var tasks = Enumerable.Range(0, 10)
+            .Select(i => expander.ExpandAsync($"q{i}", CancellationToken.None))
+            .ToArray();
+        await Task.WhenAll(tasks);
+
+        // All should have returned a fallback (no crashes, no exceptions).
+        tasks.Should().OnlyContain(t => t.Result.UsedFallback);
+
+        // Breaker is armed — advance past cooldown and it should re-arm
+        // exactly once. Advance exactly 60s from the first failure's
+        // GetUtcNow() sample = DateTimeOffset.UnixEpoch (since FakeTimeProvider
+        // didn't advance during the race). If the breaker was re-armed at a
+        // later time by a racing writer, 60s wouldn't be enough.
+        time.Advance(TimeSpan.FromSeconds(60).Add(TimeSpan.FromTicks(1)));
+        handler.SetResponse(HttpStatusCode.OK,
+            """{"choices":[{"message":{"role":"assistant","content":"Valid paragraph longer than twenty chars about EVPN."}}]}""");
+
+        var recovered = await expander.ExpandAsync("post-cooldown", CancellationToken.None);
+        recovered.UsedFallback.Should().BeFalse(
+            "cooldown deadline should have been set exactly once — if racing writers extended it, 60s advance would be insufficient");
+    }
+
+    [Fact]
     public async Task Disabled_BehaviourUsesNoopExpander()
     {
         var noop = new NoopHydeExpander();

@@ -85,18 +85,15 @@ public static class ValidateBenchQueriesCommand
             return 2;
         }
 
-        await using var ds = DataSourceFactory.Build(settings.ConnectionString);
-
-        using var embedder = new OnnxEmbedder(new EmbeddingOptions
+        if (!File.Exists(inputPath))
         {
-            ModelPath = embedderModel,
-            VocabPath = embedderVocab,
-            Gpu = settings.Gpu,
-        });
-        using IReranker reranker = BuildReranker(modelsDir, settings.Gpu);
-        var hyde = ServerHosting.BuildHyde(settings);
-        var retriever = new HybridRetriever(embedder, reranker, ds, hyde);
+            console.MarkupLine($"[red]error[/] input file not found: {Markup.Escape(inputPath)}");
+            return 2;
+        }
 
+        // Read candidates BEFORE constructing the embedder + reranker — ONNX
+        // session init is ~200 ms and pointless on empty input. This also
+        // closes M6 from the v0.2.0 code review.
         var candidates = new List<QueryRecord>();
         using (var reader = File.OpenText(inputPath))
         {
@@ -114,7 +111,26 @@ public static class ValidateBenchQueriesCommand
                 }
             }
         }
+
+        if (candidates.Count == 0)
+        {
+            console.MarkupLine($"[red]error[/] no candidate queries parsed from {Markup.Escape(inputPath)} (empty or malformed JSONL)");
+            return 2;
+        }
+
         console.MarkupLine($"[bold]validate-bench-queries[/] — {candidates.Count} candidates from {Markup.Escape(inputPath)}");
+
+        await using var ds = DataSourceFactory.Build(settings.ConnectionString);
+
+        using var embedder = new OnnxEmbedder(new EmbeddingOptions
+        {
+            ModelPath = embedderModel,
+            VocabPath = embedderVocab,
+            Gpu = settings.Gpu,
+        });
+        using IReranker reranker = BuildReranker(modelsDir, settings.Gpu);
+        var hyde = ServerHosting.BuildHyde(settings);
+        var retriever = new HybridRetriever(embedder, reranker, ds, hyde);
 
         var outDir = Path.GetDirectoryName(outputPath);
         if (!string.IsNullOrEmpty(outDir))

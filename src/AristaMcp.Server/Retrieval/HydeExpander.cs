@@ -156,11 +156,19 @@ public sealed class HydeExpander : IHydeExpander
     private void RecordFailure()
     {
         var count = Interlocked.Increment(ref _consecutiveFailures);
-        if (count >= _opt.CircuitFailureThreshold)
+        if (count < _opt.CircuitFailureThreshold)
         {
-            var openUntil = _time.GetUtcNow().AddSeconds(_opt.CircuitCooldownSeconds).Ticks;
-            Interlocked.Exchange(ref _circuitOpenUntilTicks, openUntil);
+            return;
         }
+
+        // CompareExchange with expected=0 means only the first thread that
+        // crosses the threshold actually writes the cooldown deadline —
+        // subsequent racing failures observe a non-zero value and no-op.
+        // Without this, N threads racing past the threshold would each
+        // sample GetUtcNow() at slightly different instants and last-writer
+        // wins, extending cooldown by the skew.
+        var openUntil = _time.GetUtcNow().AddSeconds(_opt.CircuitCooldownSeconds).Ticks;
+        Interlocked.CompareExchange(ref _circuitOpenUntilTicks, openUntil, 0L);
     }
 
     private void Add(string key, string value)
