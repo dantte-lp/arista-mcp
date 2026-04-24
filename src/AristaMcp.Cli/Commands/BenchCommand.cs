@@ -5,6 +5,7 @@ using AristaMcp.Cli.Benchmarks;
 using AristaMcp.Cli.Configuration;
 using AristaMcp.Core.Retrieval;
 using AristaMcp.Core.Settings;
+using AristaMcp.Server;
 using AristaMcp.Server.Observability;
 using AristaMcp.Data;
 using AristaMcp.Embedding;
@@ -124,7 +125,8 @@ public static class BenchCommand
         });
 
         using IReranker reranker = BuildReranker(modelsDir, settings.Gpu);
-        var retriever = new HybridRetriever(embedder, reranker, ds);
+        var hyde = ServerHosting.BuildHyde(settings);
+        var retriever = new HybridRetriever(embedder, reranker, ds, hyde);
 
         var rows = new List<BenchRow>(set.Queries.Count);
 
@@ -149,7 +151,7 @@ public static class BenchCommand
 
         if (historyPath is not null)
         {
-            await AppendHistoryAsync(historyPath.FullName, rows, topK, label, ct).ConfigureAwait(false);
+            await AppendHistoryAsync(historyPath.FullName, rows, topK, label, set.Version, ct).ConfigureAwait(false);
             console.MarkupLine($"  [grey]history → {Markup.Escape(historyPath.FullName)}[/]");
         }
 
@@ -162,6 +164,7 @@ public static class BenchCommand
         List<BenchRow> rows,
         int topK,
         string? label,
+        int querySetVersion,
         CancellationToken ct)
     {
         var latencies = rows.Select(r => r.ElapsedMs).OrderBy(x => x).ToArray();
@@ -169,6 +172,7 @@ public static class BenchCommand
         {
             date = DateTimeOffset.UtcNow,
             label,
+            query_set_version = querySetVersion,
             query_count = rows.Count,
             top_k = topK,
             top1_hit_rate = rows.Count == 0 ? 0.0 : Math.Round(rows.Count(r => r.Top1) * 100.0 / rows.Count, 2),
@@ -190,23 +194,35 @@ public static class BenchCommand
 
     private static IReranker BuildReranker(string modelsDir, bool gpu)
     {
-        var modelPath = Path.Combine(modelsDir, "reranker", "model.onnx");
-        var vocabPath = Path.Combine(modelsDir, "reranker", "vocab.txt");
-        if (!File.Exists(modelPath) || !File.Exists(vocabPath))
+        var family = RerankerFamilyDetector.Detect(modelsDir);
+        var modelPath = ModelPaths.RerankerModel(modelsDir);
+        return family switch
         {
-            return new NoopReranker();
-        }
-
-        return new OnnxReranker(new RerankerOptions
-        {
-            ModelPath = modelPath,
-            VocabPath = vocabPath,
-            Gpu = gpu,
-        });
+            RerankerTokenizerFamily.XlmRobertaSentencePiece => new XlmRobertaOnnxReranker(new RerankerOptions
+            {
+                ModelPath = modelPath,
+                VocabPath = ModelPaths.RerankerSpm(modelsDir),
+                Gpu = gpu,
+            }),
+            RerankerTokenizerFamily.BertWordPiece => new OnnxReranker(new RerankerOptions
+            {
+                ModelPath = modelPath,
+                VocabPath = ModelPaths.RerankerVocab(modelsDir),
+                Gpu = gpu,
+            }),
+            _ => new NoopReranker(),
+        };
     }
 
     private static bool ResultMatches(Core.Models.ChunkResult r, Benchmarks.BenchmarkQuery query)
     {
+        // v2 bench takes precedence: if ground-truth chunk IDs are populated,
+        // scoring is pure ID membership and the heuristic fields are ignored.
+        if (query.ExpectAnyOfChunkIds.Count > 0)
+        {
+            return query.ExpectAnyOfChunkIds.Contains(r.ChunkId);
+        }
+
         if (query.ExpectProduct is not null
             && string.Equals(r.Product, query.ExpectProduct, StringComparison.OrdinalIgnoreCase))
         {

@@ -13,6 +13,7 @@ internal static class Program
             ServeCommand.Build(),
             BenchCommand.Build(),
             CurateTriplesCommand.Build(),
+            ValidateBenchQueriesCommand.Build(),
         };
 
         return root.Parse(args).InvokeAsync();
