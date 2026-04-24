@@ -7,7 +7,7 @@ Hybrid retrieval MCP server for Arista documentation.
 [![pgvector](https://img.shields.io/badge/pgvector-0.8.2-336791)](https://github.com/pgvector/pgvector)
 [![ONNX Runtime](https://img.shields.io/badge/ONNX_Runtime-1.24-005CED)](https://onnxruntime.ai/)
 [![MCP](https://img.shields.io/badge/MCP-1.2-blueviolet)](https://modelcontextprotocol.io/)
-[![License](https://img.shields.io/badge/license-TBD-lightgrey)](#license)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **[English docs](docs/en/) · [Документация на русском](docs/ru/) · [Changelog](CHANGELOG.md)**
 
@@ -153,4 +153,4 @@ Historical / operational notes: [`docs/mcp-integration.md`](docs/mcp-integration
 
 ## License
 
-TBD.
+MIT — see [`LICENSE`](LICENSE).

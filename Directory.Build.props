@@ -33,6 +33,8 @@
     <RepositoryUrl>https://github.com/dantte-lp/arista-mcp</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/dantte-lp/arista-mcp</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 dantte-lp</Copyright>
 
     <!-- Deterministic builds on CI — no per-build timestamps leak into the
          assembly, so the same commit always produces the same bytes. -->
