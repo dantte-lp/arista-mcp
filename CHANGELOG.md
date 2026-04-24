@@ -12,6 +12,18 @@ Work toward v0.3.0 — lift top-1 on the 588-query v2 bench from the
 90.82 % stock MiniLM baseline to ≥ 95 % while staying CPU-only.
 Plan: [`docs/superpowers/plans/2026-04-24-arista-mcp-retrieval-quality-v0.3-revised.md`](docs/superpowers/plans/2026-04-24-arista-mcp-retrieval-quality-v0.3-revised.md).
 
+_(no entries yet)_
+
+## [0.2.0] — 2026-04-24
+
+First post-v0.1.4 release — platform polish for **measurement** and
+**query rewriting** scaffolding. Retrieval quality outcomes (HyDE,
+bge-reranker-base) were neutral-to-negative, so the default stack is
+unchanged; the code paths ship off-by-default for the Sprint 14 /
+v0.3.0 work that will use them.
+
+Plan: [`docs/superpowers/plans/2026-04-24-arista-mcp-release-polish-v0.2.md`](docs/superpowers/plans/2026-04-24-arista-mcp-release-polish-v0.2.md).
+
 ### Added
 
 - **XLM-RoBERTa reranker family** — `XlmRobertaOnnxReranker` +
@@ -44,7 +56,15 @@ Plan: [`docs/superpowers/plans/2026-04-24-arista-mcp-retrieval-quality-v0.3-revi
 - **`SearchDiagnostics` HyDE fields** — `HydeMs`, `HydeHit`,
   `HydeFallback`. Backwards-compatible (all default to zero / false).
 - **Multilingual documentation** under `docs/en/` and `docs/ru/` with
-  Mermaid architecture / retrieval / ingest diagrams.
+  Mermaid architecture / retrieval / ingest diagrams, plus
+  [`releasing.md`](docs/en/releasing.md).
+- **`LICENSE`** (MIT), **`SECURITY.md`** (responsible-disclosure
+  policy), **`.github/workflows/ci.yml`** (fast build + unit tests on
+  every PR / push), **`.github/dependabot.yml`** (weekly NuGet +
+  GitHub Actions scans).
+- **Assembly metadata** in `Directory.Build.props` — `Version=0.2.0`,
+  `Authors`, `Product`, `RepositoryUrl`, `PackageLicenseExpression`,
+  `ContinuousIntegrationBuild` on CI for deterministic binaries.
 
 ### Changed
 
@@ -55,6 +75,24 @@ Plan: [`docs/superpowers/plans/2026-04-24-arista-mcp-retrieval-quality-v0.3-revi
   compiling unchanged.
 - `fetch-models.ps1` pulls the `Qwen/Qwen2.5-1.5B-Instruct` Q4_K_M GGUF
   into `models/llm/` for the HyDE sidecar.
+
+### Fixed
+
+- **HyDE circuit breaker race (M1)** — `RecordFailure` now uses
+  `Interlocked.CompareExchange(expected=0)` so only the first
+  threshold-crosser arms the cooldown deadline; racing failures
+  no-op on the ticks field. Test `CircuitArms_ExactlyOnce_UnderConcurrentFailures`
+  fires 10 parallel 5xx queries and verifies the cooldown is not
+  extended by skew.
+- **`HydeExpander.CallLlmAsync` crash on malformed JSON (M2)** —
+  `ReadFromJsonAsync` throws `JsonException`, not `HttpRequestException`,
+  so a llama.cpp 200 OK with a truncated body used to propagate out
+  and tear down the whole search. Now caught together with
+  `NotSupportedException`; retriever falls back to the raw query.
+- **`validate-bench-queries` empty-input handling (M6)** — guards
+  against empty / malformed JSONL input before building the ONNX
+  embedder + reranker; returns exit code 2 with a clear error instead
+  of burning ~200 ms on session init.
 
 ### Research outcomes retained for provenance
 
@@ -419,7 +457,8 @@ vchord_bm25 0.3.0 + pg_tokenizer 0.1.1.
 
 ---
 
-[Unreleased]: https://github.com/dantte-lp/arista-mcp/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/dantte-lp/arista-mcp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/dantte-lp/arista-mcp/compare/v0.1.4...v0.2.0
 [v0.1.4]: https://github.com/dantte-lp/arista-mcp/compare/v0.1.3...v0.1.4
 [v0.1.3]: https://github.com/dantte-lp/arista-mcp/compare/v0.1.2...v0.1.3
 [v0.1.2]: https://github.com/dantte-lp/arista-mcp/compare/v0.1.1...v0.1.2
