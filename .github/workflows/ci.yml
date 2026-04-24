@@ -25,7 +25,12 @@ jobs:
         with:
           global-json-file: global.json
           cache: true
-          cache-dependency-path: '**/packages.lock.json'
+          # Central package management: Directory.Packages.props is the single
+          # source of truth for versions; csproj files only carry PackageReference
+          # names. Hash both so the cache invalidates on either axis.
+          cache-dependency-path: |
+            Directory.Packages.props
+            **/*.csproj
 
       - name: Restore
         run: dotnet restore
