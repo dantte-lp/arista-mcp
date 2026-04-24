@@ -13,6 +13,7 @@
 | [mcp-tools.md](mcp-tools.md)              | Reference         | Найти схемы входа / выхода MCP-инструментов           |
 | [benchmarking.md](benchmarking.md)        | How-to            | Запускать и интерпретировать бенчи, расширять v2-набор |
 | [development.md](development.md)          | How-to            | Собирать, тестировать, контрибьютить                  |
+| [releasing.md](releasing.md)              | How-to            | Как делать релиз (CHANGELOG roll, тег, GitHub Release) |
 
 Дополнительные документы (не переводились):
 

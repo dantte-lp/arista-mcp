@@ -1,0 +1,33 @@
+version: 2
+
+updates:
+  # NuGet — central package management means Dependabot tracks Directory.Packages.props.
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Moscow"
+    labels:
+      - "deps"
+      - "nuget"
+    open-pull-requests-limit: 5
+    groups:
+      # Bundle minor/patch updates so the PR queue stays readable.
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+      # Major bumps still get individual PRs — review them case-by-case.
+
+  # GitHub Actions versions (setup-dotnet, checkout, upload-artifact, etc).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "deps"
+      - "github-actions"
+    open-pull-requests-limit: 3

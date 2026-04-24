@@ -13,6 +13,7 @@ Organised loosely along the [Diátaxis](https://diataxis.fr/) axes:
 | [mcp-tools.md](mcp-tools.md)              | Reference         | Look up tool input / output schemas                   |
 | [benchmarking.md](benchmarking.md)        | How-to            | Run / interpret benches, extend the v2 query set      |
 | [development.md](development.md)          | How-to            | Build, test, contribute changes                       |
+| [releasing.md](releasing.md)              | How-to            | Cut a release (CHANGELOG roll, tag, GitHub Release)   |
 
 External, not re-written:
 

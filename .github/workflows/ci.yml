@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build + unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build (Release)
+        run: dotnet build --no-restore -c Release
+
+      # Unit tests only — integration tests that hit PostgreSQL run in e2e.yml
+      # with a service container. SkippableFact tests skip cleanly when their
+      # external resource (models, DB) is absent so we don't need to filter.
+      - name: Test
+        run: >-
+          dotnet test --no-build -c Release
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory TestResults
+          --filter "FullyQualifiedName!~AristaMcp.Data.Tests&FullyQualifiedName!~AristaMcp.E2E"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults
+          retention-days: 14
