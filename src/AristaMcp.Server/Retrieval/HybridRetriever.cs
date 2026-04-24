@@ -12,19 +12,40 @@ namespace AristaMcp.Server.Retrieval;
 
 // Hybrid retrieval:
 //   1. Expand the query (Arista acronym annotations)
-//   2. Embed the expanded query with the IEmbedder's query prefix
-//   3. In parallel:
+//   2. HyDE: rewrite into a hypothetical answer paragraph (when enabled).
+//      Only the DENSE path uses the rewritten text — BM25 and the reranker
+//      both keep the raw expanded query (HyDE hallucinations would poison
+//      lexical matching and confuse a cross-encoder).
+//   3. Embed the dense query with the IEmbedder's query prefix
+//   4. In parallel:
 //        - dense: ORDER BY embedding <=> $1::halfvec (pgvector cosine)
 //        - sparse: ORDER BY bm25v <&> to_bm25query(idx, tokenize(q, 'chunks_tokenizer')::bm25vector)
-//   4. Reciprocal Rank Fusion with k=60 (RrfK) — tracks BOTH distances per co-hit so
+//   5. Reciprocal Rank Fusion with k=60 (RrfK) — tracks BOTH distances per co-hit so
 //      diagnostics report accurate DenseSimilarity + Bm25Score even for fused chunks.
-//   5. Rerank top-N via IReranker
-//   6. Emit diagnostics alongside results
-public sealed class HybridRetriever(
-    IEmbedder embedder,
-    IReranker reranker,
-    NpgsqlDataSource dataSource) : IHybridRetriever
+//   6. Rerank top-N via IReranker
+//   7. Emit diagnostics alongside results
+public sealed class HybridRetriever : IHybridRetriever
 {
+    private readonly IEmbedder _embedder;
+    private readonly IReranker _reranker;
+    private readonly NpgsqlDataSource _dataSource;
+    private readonly IHydeExpander _hyde;
+
+    public HybridRetriever(
+        IEmbedder embedder,
+        IReranker reranker,
+        NpgsqlDataSource dataSource,
+        IHydeExpander? hyde = null)
+    {
+        ArgumentNullException.ThrowIfNull(embedder);
+        ArgumentNullException.ThrowIfNull(reranker);
+        ArgumentNullException.ThrowIfNull(dataSource);
+        _embedder = embedder;
+        _reranker = reranker;
+        _dataSource = dataSource;
+        _hyde = hyde ?? new NoopHydeExpander();
+    }
+
     // Size is deliberately small — retrieval workloads have tight hot-sets
     // (top ~100 Claude-issued queries per session). Larger just wastes RAM.
     private readonly QueryEmbeddingCache _queryCache = new(capacity: 256);
@@ -51,10 +72,15 @@ public sealed class HybridRetriever(
         var total = Stopwatch.StartNew();
         var expansion = QueryExpander.Expand(query);
 
+        // HyDE rewrite — only feeds the dense path. On timeout / 5xx / disabled
+        // the expander returns the raw expansion so retrieval never blocks.
+        var hyde = await _hyde.ExpandAsync(expansion.Expanded, ct).ConfigureAwait(false);
+        var denseQuery = hyde.DenseQuery;
+
         var embedSw = Stopwatch.StartNew();
         HalfVector qVec;
         bool cacheHit;
-        if (_queryCache.TryGet(expansion.Expanded, out var cached))
+        if (_queryCache.TryGet(denseQuery, out var cached))
         {
             qVec = cached;
             cacheHit = true;
@@ -62,11 +88,11 @@ public sealed class HybridRetriever(
         else
         {
             using var embedSpan = AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchEmbed);
-            var qVecs = await embedder.EmbedAsync(
-                [expansion.Expanded], isQuery: true, ct).ConfigureAwait(false);
+            var qVecs = await _embedder.EmbedAsync(
+                [denseQuery], isQuery: true, ct).ConfigureAwait(false);
             Half[] halfArr = [.. qVecs[0].Select(static f => (Half)f)];
             qVec = new HalfVector(halfArr);
-            _queryCache.Add(expansion.Expanded, qVec);
+            _queryCache.Add(denseQuery, qVec);
             cacheHit = false;
         }
         embedSw.Stop();
@@ -96,7 +122,7 @@ public sealed class HybridRetriever(
         using (AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchRerank))
         {
             var rerankInput = topForRerank.Select(f => new RerankCandidate(f.Row.ChunkId, f.Row.Content)).ToList();
-            rerankResults = await reranker.RerankAsync(expansion.Expanded, rerankInput, ct).ConfigureAwait(false);
+            rerankResults = await _reranker.RerankAsync(expansion.Expanded, rerankInput, ct).ConfigureAwait(false);
         }
         rerankSw.Stop();
 
@@ -121,7 +147,10 @@ public sealed class HybridRetriever(
             SparseQueryMs: sparseMs,
             RrfMs: rrfSw.Elapsed.TotalMilliseconds,
             RerankMs: rerankSw.Elapsed.TotalMilliseconds,
-            TotalMs: total.Elapsed.TotalMilliseconds);
+            TotalMs: total.Elapsed.TotalMilliseconds,
+            HydeMs: hyde.LatencyMs,
+            HydeHit: hyde.CacheHit,
+            HydeFallback: hyde.UsedFallback);
 
         outerSpan?.SetTag(AristaActivity.Tags.DenseHits, denseRows.Count);
         outerSpan?.SetTag(AristaActivity.Tags.SparseHits, sparseRows.Count);
@@ -149,7 +178,7 @@ public sealed class HybridRetriever(
             """;
 
         var sw = Stopwatch.StartNew();
-        await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.Parameters.Add(new NpgsqlParameter { Value = qVec });
@@ -186,7 +215,7 @@ public sealed class HybridRetriever(
             """;
 
         var sw = Stopwatch.StartNew();
-        await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.Parameters.Add(new NpgsqlParameter<string> { TypedValue = query });

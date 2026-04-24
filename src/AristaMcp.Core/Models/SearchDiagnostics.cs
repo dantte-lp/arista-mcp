@@ -10,4 +10,9 @@ public sealed record SearchDiagnostics(
     double SparseQueryMs,
     double RrfMs,
     double RerankMs,
-    double TotalMs);
+    double TotalMs,
+    // Sprint 10: HyDE timing. HydeMs=0 and HydeHit=false on a NoopHydeExpander
+    // or when disabled, so default-args keep pre-HyDE callers compiling.
+    double HydeMs = 0,
+    bool HydeHit = false,
+    bool HydeFallback = false);

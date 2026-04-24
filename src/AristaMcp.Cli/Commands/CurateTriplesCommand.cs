@@ -7,6 +7,7 @@ using AristaMcp.Core.Retrieval;
 using AristaMcp.Core.Settings;
 using AristaMcp.Data;
 using AristaMcp.Embedding;
+using AristaMcp.Server;
 using AristaMcp.Server.Observability;
 using AristaMcp.Server.Retrieval;
 using Microsoft.EntityFrameworkCore;
@@ -120,7 +121,8 @@ public static class CurateTriplesCommand
             Gpu = settings.Gpu,
         });
         using IReranker reranker = BuildReranker(modelsDir, settings.Gpu);
-        var retriever = new HybridRetriever(embedder, reranker, ds);
+        var hyde = ServerHosting.BuildHyde(settings);
+        var retriever = new HybridRetriever(embedder, reranker, ds, hyde);
 
         var (triples, stats) = await TripleCurator.CurateAsync(
             set.Queries, retriever, negativesPerQuery, ct).ConfigureAwait(false);
@@ -140,18 +142,23 @@ public static class CurateTriplesCommand
 
     private static IReranker BuildReranker(string modelsDir, bool gpu)
     {
-        var modelPath = Path.Combine(modelsDir, "reranker", "model.onnx");
-        var vocabPath = Path.Combine(modelsDir, "reranker", "vocab.txt");
-        if (!File.Exists(modelPath) || !File.Exists(vocabPath))
+        var family = RerankerFamilyDetector.Detect(modelsDir);
+        var modelPath = ModelPaths.RerankerModel(modelsDir);
+        return family switch
         {
-            return new NoopReranker();
-        }
-
-        return new OnnxReranker(new RerankerOptions
-        {
-            ModelPath = modelPath,
-            VocabPath = vocabPath,
-            Gpu = gpu,
-        });
+            RerankerTokenizerFamily.XlmRobertaSentencePiece => new XlmRobertaOnnxReranker(new RerankerOptions
+            {
+                ModelPath = modelPath,
+                VocabPath = ModelPaths.RerankerSpm(modelsDir),
+                Gpu = gpu,
+            }),
+            RerankerTokenizerFamily.BertWordPiece => new OnnxReranker(new RerankerOptions
+            {
+                ModelPath = modelPath,
+                VocabPath = ModelPaths.RerankerVocab(modelsDir),
+                Gpu = gpu,
+            }),
+            _ => new NoopReranker(),
+        };
     }
 }

@@ -30,4 +30,7 @@ public sealed class AristaMcpSettings
     public int ChunkTargetTokens { get; set; } = 512;
     public int ChunkOverlapTokens { get; set; } = 64;
     public int ChunkMinTokens { get; set; } = 40;
+
+    // Sprint 10: HyDE query rewriting via local llama.cpp sidecar.
+    public HydeSettings Hyde { get; set; } = new();
 }

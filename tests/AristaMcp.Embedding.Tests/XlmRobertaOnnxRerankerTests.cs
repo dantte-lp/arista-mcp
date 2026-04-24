@@ -5,24 +5,21 @@ using Xunit;
 
 namespace AristaMcp.Embedding.Tests;
 
-public class OnnxRerankerTests
+public class XlmRobertaOnnxRerankerTests
 {
-    private static string? FindRerankerDir()
+    private static (string Model, string Spm)? FindBgeAssets()
     {
-        // Walk up looking for BERT WordPiece reranker assets (MiniLM-L6 family).
-        // Probe both the canonical `models/reranker/` location and the archived
-        // `models/reranker-minilm-v0.1.4-baseline/` location that holds the
-        // pre-cutover MiniLM model after v0.2.2 promoted bge-reranker-base.
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            foreach (var sub in new[] { "reranker", "reranker-minilm-v0.1.4-baseline" })
+            foreach (var sub in new[] { "reranker-bge", "reranker" })
             {
                 var root = Path.Combine(dir.FullName, "models", sub);
-                if (File.Exists(Path.Combine(root, "model.onnx"))
-                    && File.Exists(Path.Combine(root, "vocab.txt")))
+                var model = Path.Combine(root, "model.onnx");
+                var spm = Path.Combine(root, "sentencepiece.bpe.model");
+                if (File.Exists(model) && File.Exists(spm))
                 {
-                    return root;
+                    return (model, spm);
                 }
             }
 
@@ -33,15 +30,15 @@ public class OnnxRerankerTests
     }
 
     [SkippableFact]
-    public async Task RelevantCandidateRanksAboveIrrelevant()
+    public async Task RelevantCandidateOutscoresIrrelevant()
     {
-        var dir = FindRerankerDir();
-        Skip.If(dir is null, "BERT-family reranker assets (model.onnx + vocab.txt) not present");
+        var assets = FindBgeAssets();
+        Skip.If(assets is null, "bge-reranker-base model.onnx + sentencepiece.bpe.model not present");
 
-        using var reranker = new OnnxReranker(new RerankerOptions
+        using var reranker = new XlmRobertaOnnxReranker(new RerankerOptions
         {
-            ModelPath = Path.Combine(dir!, "model.onnx"),
-            VocabPath = Path.Combine(dir!, "vocab.txt"),
+            ModelPath = assets.Value.Model,
+            VocabPath = assets.Value.Spm,
         });
 
         var candidates = new[]

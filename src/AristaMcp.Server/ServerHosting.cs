@@ -37,6 +37,7 @@ public static class ServerHosting
 
         services.AddSingleton<IEmbedder>(_ => BuildAndWarmEmbedder(settings));
         services.AddSingleton<IReranker>(_ => BuildReranker(settings));
+        services.AddSingleton<IHydeExpander>(_ => BuildHyde(settings));
 
         services.AddScoped<IDocumentRepository, DocumentRepository>();
         services.AddScoped<IChunkRepository>(sp => new ChunkRepository(
@@ -47,7 +48,8 @@ public static class ServerHosting
         services.AddSingleton<IHybridRetriever>(sp => new HybridRetriever(
             sp.GetRequiredService<IEmbedder>(),
             sp.GetRequiredService<IReranker>(),
-            sp.GetRequiredService<NpgsqlDataSource>()));
+            sp.GetRequiredService<NpgsqlDataSource>(),
+            sp.GetRequiredService<IHydeExpander>()));
 
         // Opt-in: registers OpenTelemetry tracing + OTLP exporter IF any of
         // ARISTA_MCP__Otel__Endpoint or OTEL_EXPORTER_OTLP_ENDPOINT is set.
@@ -57,23 +59,50 @@ public static class ServerHosting
         return services;
     }
 
-    // Swap to OnnxReranker when models/reranker/ is populated; otherwise fall back to
-    // the passthrough. This keeps `arista-mcp serve` usable even without a rerank model.
+    // Detect tokenizer family from files under models/reranker. If SPM is
+    // present pick the XLM-R path for bge-reranker; else if vocab.txt is
+    // present pick the BERT WordPiece path for MiniLM; else fall back to
+    // NoopReranker so serve stays usable with no reranker asset installed.
     private static IReranker BuildReranker(AristaMcpSettings settings)
     {
-        var modelPath = Path.Combine(settings.ModelsDir, "reranker", "model.onnx");
-        var vocabPath = Path.Combine(settings.ModelsDir, "reranker", "vocab.txt");
-        if (!File.Exists(modelPath) || !File.Exists(vocabPath))
+        var family = RerankerFamilyDetector.Detect(settings.ModelsDir);
+        var modelPath = ModelPaths.RerankerModel(settings.ModelsDir);
+
+        return family switch
         {
-            return new NoopReranker();
+            RerankerTokenizerFamily.XlmRobertaSentencePiece => new XlmRobertaOnnxReranker(new RerankerOptions
+            {
+                ModelPath = modelPath,
+                VocabPath = ModelPaths.RerankerSpm(settings.ModelsDir),
+                Gpu = settings.Gpu,
+            }),
+            RerankerTokenizerFamily.BertWordPiece => new OnnxReranker(new RerankerOptions
+            {
+                ModelPath = modelPath,
+                VocabPath = ModelPaths.RerankerVocab(settings.ModelsDir),
+                Gpu = settings.Gpu,
+            }),
+            _ => new NoopReranker(),
+        };
+    }
+
+    // HyDE expander factory. Off by default (NoopHydeExpander) so startups
+    // without the llama.cpp sidecar running don't burn time on DNS lookups
+    // for a localhost that isn't listening. HTTP client timeout is slightly
+    // larger than the per-request timeout because PostAsJsonAsync also runs
+    // the connection handshake under the same budget.
+    public static IHydeExpander BuildHyde(AristaMcpSettings settings)
+    {
+        if (!settings.Hyde.Enabled)
+        {
+            return new NoopHydeExpander();
         }
 
-        return new OnnxReranker(new RerankerOptions
+        var http = new HttpClient
         {
-            ModelPath = modelPath,
-            VocabPath = vocabPath,
-            Gpu = settings.Gpu,
-        });
+            Timeout = TimeSpan.FromMilliseconds(settings.Hyde.TimeoutMs + 1000),
+        };
+        return new HydeExpander(http, settings.Hyde, TimeProvider.System);
     }
 
     private static OnnxEmbedder BuildEmbedder(AristaMcpSettings settings)

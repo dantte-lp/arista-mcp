@@ -43,5 +43,39 @@ services:
       retries: 10
       start_period: 30s
 
+  # Sprint 10: Qwen2.5-1.5B-Instruct served by llama.cpp as an OpenAI-compatible
+  # HTTP API on 127.0.0.1:8090. Used by the HyDE query-rewriting expander; when
+  # unreachable, HydeExpander falls back to the raw query so arista-mcp stays
+  # functional with the sidecar down. Opt-in via `--profile llm` so `podman
+  # compose up` stays fast for users who don't want HyDE.
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: arista-mcp-llm
+    restart: unless-stopped
+    profiles: ["llm"]
+    # Sprint 13: swap 1.5B → 3B for offline batch query generation /
+    # multi-positive annotation. Bigger context + better instruction
+    # following. HyDE hot-path (Sprint 10, currently Enabled=false)
+    # also benefits when re-enabled. Latency ~2x per call but we are
+    # batch-oriented here, not interactive.
+    command: >-
+      --model /models/qwen2.5-3b-instruct-q4_k_m.gguf
+      --port 8090
+      --host 0.0.0.0
+      --ctx-size 4096
+      --threads 8
+      --log-disable
+    ports:
+      # 0.0.0.0 inside podman-machine for the same WSL2 interop reason as postgres.
+      - "0.0.0.0:8090:8090"
+    volumes:
+      - ../models/llm:/models:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8090/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
 volumes:
   arista-pgdata:

@@ -3,9 +3,13 @@ namespace AristaMcp.Embedding;
 public sealed class RerankerOptions
 {
     public required string ModelPath { get; init; }
+
+    // Tokenizer asset path. Holds the WordPiece vocab file path for
+    // OnnxReranker, or the SentencePiece BPE model path for
+    // XlmRobertaOnnxReranker. Named VocabPath for historical compatibility.
     public required string VocabPath { get; init; }
 
-    // Each candidate gets tokenized as [CLS] query [SEP] doc [SEP], truncated to this.
+    // Query+doc pair is truncated to this total length (including special tokens).
     public int MaxSequenceLength { get; init; } = 512;
 
     // Cross-encoders are heavier per token than bi-encoders; keep the batch smaller.

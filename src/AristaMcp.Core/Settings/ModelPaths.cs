@@ -20,4 +20,8 @@ public static class ModelPaths
 
     public static string RerankerVocab(string modelsDir) =>
         Path.Combine(modelsDir, "reranker", "vocab.txt");
+
+    // SentencePiece BPE model used by XLM-RoBERTa / bge-reranker-* cross-encoders.
+    public static string RerankerSpm(string modelsDir) =>
+        Path.Combine(modelsDir, "reranker", "sentencepiece.bpe.model");
 }
