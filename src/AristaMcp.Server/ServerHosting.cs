@@ -38,6 +38,7 @@ public static class ServerHosting
         services.AddSingleton<IEmbedder>(_ => BuildAndWarmEmbedder(settings));
         services.AddSingleton<IReranker>(_ => BuildReranker(settings));
         services.AddSingleton<IHydeExpander>(_ => BuildHyde(settings));
+        services.AddSingleton<IMultiQueryExpander>(_ => BuildMultiQuery(settings));
 
         services.AddScoped<IDocumentRepository, DocumentRepository>();
         services.AddScoped<IChunkRepository>(sp => new ChunkRepository(
@@ -49,7 +50,8 @@ public static class ServerHosting
             sp.GetRequiredService<IEmbedder>(),
             sp.GetRequiredService<IReranker>(),
             sp.GetRequiredService<NpgsqlDataSource>(),
-            sp.GetRequiredService<IHydeExpander>()));
+            sp.GetRequiredService<IHydeExpander>(),
+            sp.GetRequiredService<IMultiQueryExpander>()));
 
         // Opt-in: registers OpenTelemetry tracing + OTLP exporter IF any of
         // ARISTA_MCP__Otel__Endpoint or OTEL_EXPORTER_OTLP_ENDPOINT is set.
@@ -103,6 +105,15 @@ public static class ServerHosting
             Timeout = TimeSpan.FromMilliseconds(settings.Hyde.TimeoutMs + 1000),
         };
         return new HydeExpander(http, settings.Hyde, TimeProvider.System);
+    }
+
+    // Multi-query expander factory. Off by default until the v0.2.5 bench
+    // gates confirm no top-K regression on niche queries.
+    public static IMultiQueryExpander BuildMultiQuery(AristaMcpSettings settings)
+    {
+        return settings.MultiQuery.Enabled
+            ? new MultiQueryExpander()
+            : new NoopMultiQueryExpander();
     }
 
     private static OnnxEmbedder BuildEmbedder(AristaMcpSettings settings)

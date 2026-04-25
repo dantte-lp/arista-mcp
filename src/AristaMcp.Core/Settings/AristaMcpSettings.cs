@@ -33,4 +33,7 @@ public sealed class AristaMcpSettings
 
     // Sprint 10: HyDE query rewriting via local llama.cpp sidecar.
     public HydeSettings Hyde { get; set; } = new();
+
+    // Sprint 15: rule-based multi-query expansion for dense retrieval.
+    public MultiQuerySettings MultiQuery { get; set; } = new();
 }

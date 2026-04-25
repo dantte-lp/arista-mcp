@@ -122,7 +122,8 @@ public static class CurateTriplesCommand
         });
         using IReranker reranker = BuildReranker(modelsDir, settings.Gpu);
         var hyde = ServerHosting.BuildHyde(settings);
-        var retriever = new HybridRetriever(embedder, reranker, ds, hyde);
+        var multiQuery = ServerHosting.BuildMultiQuery(settings);
+        var retriever = new HybridRetriever(embedder, reranker, ds, hyde, multiQuery);
 
         var (triples, stats) = await TripleCurator.CurateAsync(
             set.Queries, retriever, negativesPerQuery, ct).ConfigureAwait(false);

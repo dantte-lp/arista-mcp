@@ -30,12 +30,14 @@ public sealed class HybridRetriever : IHybridRetriever
     private readonly IReranker _reranker;
     private readonly NpgsqlDataSource _dataSource;
     private readonly IHydeExpander _hyde;
+    private readonly IMultiQueryExpander _multiQuery;
 
     public HybridRetriever(
         IEmbedder embedder,
         IReranker reranker,
         NpgsqlDataSource dataSource,
-        IHydeExpander? hyde = null)
+        IHydeExpander? hyde = null,
+        IMultiQueryExpander? multiQuery = null)
     {
         ArgumentNullException.ThrowIfNull(embedder);
         ArgumentNullException.ThrowIfNull(reranker);
@@ -44,6 +46,7 @@ public sealed class HybridRetriever : IHybridRetriever
         _reranker = reranker;
         _dataSource = dataSource;
         _hyde = hyde ?? new NoopHydeExpander();
+        _multiQuery = multiQuery ?? new NoopMultiQueryExpander();
     }
 
     // Size is deliberately small — retrieval workloads have tight hot-sets
@@ -75,33 +78,51 @@ public sealed class HybridRetriever : IHybridRetriever
         // HyDE rewrite — only feeds the dense path. On timeout / 5xx / disabled
         // the expander returns the raw expansion so retrieval never blocks.
         var hyde = await _hyde.ExpandAsync(expansion.Expanded, ct).ConfigureAwait(false);
-        var denseQuery = hyde.DenseQuery;
+        var primaryDenseQuery = hyde.DenseQuery;
+
+        // Multi-query expansion — produces 1..N rule-based variants.
+        // Always includes primaryDenseQuery as the first entry. BM25 and
+        // the reranker stay on expansion.Expanded; only dense widens.
+        var denseVariants = _multiQuery.Expand(primaryDenseQuery);
 
         var embedSw = Stopwatch.StartNew();
-        HalfVector qVec;
-        bool cacheHit;
-        if (_queryCache.TryGet(denseQuery, out var cached))
+        var qVecs = new List<HalfVector>(denseVariants.Count);
+        var anyCacheHit = false;
+        var anyCacheMiss = false;
+        foreach (var variant in denseVariants)
         {
-            qVec = cached;
-            cacheHit = true;
-        }
-        else
-        {
+            if (_queryCache.TryGet(variant, out var cached))
+            {
+                qVecs.Add(cached);
+                anyCacheHit = true;
+                continue;
+            }
             using var embedSpan = AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchEmbed);
-            var qVecs = await _embedder.EmbedAsync(
-                [denseQuery], isQuery: true, ct).ConfigureAwait(false);
-            Half[] halfArr = [.. qVecs[0].Select(static f => (Half)f)];
-            qVec = new HalfVector(halfArr);
-            _queryCache.Add(denseQuery, qVec);
-            cacheHit = false;
+            var emb = await _embedder.EmbedAsync(
+                [variant], isQuery: true, ct).ConfigureAwait(false);
+            Half[] halfArr = [.. emb[0].Select(static f => (Half)f)];
+            var qv = new HalfVector(halfArr);
+            _queryCache.Add(variant, qv);
+            qVecs.Add(qv);
+            anyCacheMiss = true;
         }
         embedSw.Stop();
-        outerSpan?.SetTag(AristaActivity.Tags.CacheHit, cacheHit);
+        // Cache hit reported as "all variants hit" — useful signal for warm vs cold queries.
+        outerSpan?.SetTag(AristaActivity.Tags.CacheHit, anyCacheHit && !anyCacheMiss);
 
-        var denseTask = RunDenseAsync(qVec, options, ct);
+        // Dense: N parallel SQL scans, then union by chunk_id keeping best rank.
+        var denseTasks = qVecs
+            .Select(qv => RunDenseAsync(qv, options, ct))
+            .ToArray();
         var sparseTask = RunSparseAsync(expansion.Expanded, options, ct);
-        await Task.WhenAll(denseTask, sparseTask).ConfigureAwait(false);
-        var (denseRows, denseMs) = denseTask.Result;
+        await Task.WhenAll([..denseTasks, sparseTask]).ConfigureAwait(false);
+
+        var denseResults = denseTasks.Select(t => t.Result).ToArray();
+        var denseRows = denseResults.Length == 1
+            ? denseResults[0].Rows
+            : UnionByBestRank(denseResults.Select(r => r.Rows));
+        // Report MAX dense latency since variants ran in parallel — not the sum.
+        var denseMs = denseResults.Max(r => r.ElapsedMs);
         var (sparseRows, sparseMs) = sparseTask.Result;
 
         var rrfSw = Stopwatch.StartNew();
@@ -156,6 +177,30 @@ public sealed class HybridRetriever : IHybridRetriever
         outerSpan?.SetTag(AristaActivity.Tags.SparseHits, sparseRows.Count);
 
         return new SearchResponse(results, diag);
+    }
+
+    // Union N dense result lists into a single list, keeping each chunk
+    // once at its best (lowest) rank across variants. The result is
+    // ordered by that best rank — what RRF then folds with sparse.
+    // For 1 input list the function is a no-op (callers short-circuit).
+    private static List<CandidateRow> UnionByBestRank(IEnumerable<List<CandidateRow>> rowLists)
+    {
+        var bestByChunk = new Dictionary<long, (int Rank, CandidateRow Row)>();
+        foreach (var list in rowLists)
+        {
+            for (var rank = 0; rank < list.Count; rank++)
+            {
+                var row = list[rank];
+                if (!bestByChunk.TryGetValue(row.ChunkId, out var existing)
+                    || rank < existing.Rank)
+                {
+                    bestByChunk[row.ChunkId] = (rank, row);
+                }
+            }
+        }
+        return [.. bestByChunk.Values
+            .OrderBy(static x => x.Rank)
+            .Select(static x => x.Row)];
     }
 
     private async Task<(List<CandidateRow> Rows, double ElapsedMs)> RunDenseAsync(
