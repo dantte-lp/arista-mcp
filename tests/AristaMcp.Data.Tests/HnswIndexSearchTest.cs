@@ -53,10 +53,11 @@ public class HnswIndexSearchTest(PgvectorFixture fx)
 
         await ctx.SaveChangesAsync();
 
-        var query = (await ctx.Chunks.AsNoTracking().FirstAsync(c => c.ChunkIndex == 0)).Embedding;
+        var query = (await ctx.Chunks.AsNoTracking().FirstAsync(c => c.ChunkIndex == 0)).Embedding!;
 
         var nearest = await ctx.Chunks
-            .OrderBy(c => c.Embedding.CosineDistance(query))
+            .Where(c => c.Embedding != null)
+            .OrderBy(c => c.Embedding!.CosineDistance(query))
             .Take(5)
             .Select(c => c.ChunkIndex)
             .ToListAsync();

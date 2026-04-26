@@ -5,6 +5,7 @@ namespace AristaMcp.Data.Repositories;
 public interface IChunkRepository
 {
     Task<int> BulkInsertAsync(IReadOnlyList<AristaChunk> chunks, CancellationToken ct);
+    Task<IReadOnlyList<long>> SelectParentIdsAsync(string documentId, CancellationToken ct);
     Task<int> DeleteByDocumentAsync(string documentId, CancellationToken ct);
     Task<int> CountAsync(CancellationToken ct);
 }

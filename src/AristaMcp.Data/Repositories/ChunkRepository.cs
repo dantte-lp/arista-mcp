@@ -1,3 +1,4 @@
+using AristaMcp.Core.Chunking;
 using AristaMcp.Core.Models;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -20,7 +21,7 @@ public sealed class ChunkRepository(NpgsqlDataSource dataSource, AristaDbContext
         await using var writer = await conn.BeginBinaryImportAsync(
             "COPY chunks (document_id, chunk_index, content, raw_content, "
             + "section_title, section_level, page_start, page_end, token_count, "
-            + "embedding, embedding_model) FROM STDIN BINARY",
+            + "embedding, embedding_model, chunk_kind, parent_chunk_id) FROM STDIN BINARY",
             ct).ConfigureAwait(false);
 
         foreach (var c in chunks)
@@ -69,13 +70,60 @@ public sealed class ChunkRepository(NpgsqlDataSource dataSource, AristaDbContext
 
             await writer.WriteAsync(c.TokenCount, NpgsqlDbType.Integer, ct).ConfigureAwait(false);
 
-            Half[] halfArr = [.. c.Embedding.Select(static f => (Half)f)];
-            await writer.WriteAsync(new HalfVector(halfArr), ct).ConfigureAwait(false);
-            await writer.WriteAsync(c.EmbeddingModel, NpgsqlDbType.Text, ct).ConfigureAwait(false);
+            // Embedding is null on parent rows (chunk_kind='parent') because
+            // parents are never embedded; the HNSW index simply does not see
+            // those rows. Leaves always carry an embedding vector.
+            if (c.Embedding is null)
+            {
+                await writer.WriteNullAsync(ct).ConfigureAwait(false);
+            }
+            else
+            {
+                Half[] halfArr = [.. c.Embedding.Select(static f => (Half)f)];
+                await writer.WriteAsync(new HalfVector(halfArr), ct).ConfigureAwait(false);
+            }
+
+            if (c.EmbeddingModel is null)
+            {
+                await writer.WriteNullAsync(ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await writer.WriteAsync(c.EmbeddingModel, NpgsqlDbType.Text, ct).ConfigureAwait(false);
+            }
+
+            await writer.WriteAsync(
+                c.ChunkKind == ChunkKind.Parent ? "parent" : "leaf",
+                NpgsqlDbType.Text, ct).ConfigureAwait(false);
+
+            if (c.ParentChunkId is null)
+            {
+                await writer.WriteNullAsync(ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await writer.WriteAsync(c.ParentChunkId.Value, NpgsqlDbType.Bigint, ct).ConfigureAwait(false);
+            }
         }
 
         await writer.CompleteAsync(ct).ConfigureAwait(false);
         return chunks.Count;
+    }
+
+    // Sprint 15: returns parent ids (ordered by chunk_index ascending) for a
+    // single document, so the caller can patch leaf parent_chunk_id values
+    // before the second-pass leaf insert. Used inside the per-doc ingest
+    // transaction immediately after BulkInsertAsync of parents.
+    public async Task<IReadOnlyList<long>> SelectParentIdsAsync(
+        string documentId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(documentId);
+        var ids = await db.Chunks
+            .Where(c => c.DocumentId == documentId && c.ChunkKind == "parent")
+            .OrderBy(c => c.ChunkIndex)
+            .Select(c => c.Id)
+            .ToListAsync(ct).ConfigureAwait(false);
+        return ids;
     }
 
     public Task<int> DeleteByDocumentAsync(string documentId, CancellationToken ct) =>

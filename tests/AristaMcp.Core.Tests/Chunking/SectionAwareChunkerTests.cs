@@ -23,12 +23,14 @@ public class SectionAwareChunkerTests
             },
         };
 
-        var chunks = chunker.Chunk("EOS User Manual", sections);
+        var result = chunker.Chunk("EOS User Manual", sections);
 
-        chunks.Should().HaveCount(1);
-        chunks[0].Content.Should().StartWith("EOS User Manual > Introduction\n\n");
-        chunks[0].RawContent.Should().NotStartWith("EOS User Manual");
-        chunks[0].SectionLevel.Should().Be((short)1);
+        result.Leaves.Should().HaveCount(1);
+        result.Leaves[0].Content.Should().StartWith("EOS User Manual > Introduction\n\n");
+        result.Leaves[0].RawContent.Should().NotStartWith("EOS User Manual");
+        result.Leaves[0].SectionLevel.Should().Be((short)1);
+        result.Parents.Should().HaveCount(1);
+        result.Leaves[0].ParentIndex.Should().Be(0);
     }
 
     [Fact]
@@ -41,9 +43,11 @@ public class SectionAwareChunkerTests
             new() { Title = "Real", Level = 1, Content = "One short body." },
         };
 
-        var chunks = chunker.Chunk("doc", sections);
+        var result = chunker.Chunk("doc", sections);
 
-        chunks.Should().ContainSingle()
+        result.Leaves.Should().ContainSingle()
+            .Which.SectionTitle.Should().Be("Real");
+        result.Parents.Should().ContainSingle()
             .Which.SectionTitle.Should().Be("Real");
     }
 
@@ -65,7 +69,8 @@ public class SectionAwareChunkerTests
             new() { Title = "Big", Level = 1, Content = body },
         };
 
-        var chunks = chunker.Chunk("doc", sections);
+        var result = chunker.Chunk("doc", sections);
+        var chunks = result.Leaves;
 
         chunks.Should().HaveCountGreaterThan(5,
             "a 300-word section at TargetTokens=20 must split into several chunks");
@@ -101,7 +106,7 @@ public class SectionAwareChunkerTests
             new() { Title = "S", Level = 1, Content = body },
         };
 
-        var chunks = chunker.Chunk("doc", sections);
+        var chunks = chunker.Chunk("doc", sections).Leaves;
         chunks.Should().NotBeEmpty();
         chunks.Should().AllSatisfy(c => c.TokenCount.Should().BeGreaterThanOrEqualTo(opts.MinTokens),
             "tiny tail chunks should have been merged into the previous chunk");
@@ -116,7 +121,7 @@ public class SectionAwareChunkerTests
             new() { Title = "BGP EVPN", Level = 2, Content = "Overlay traffic uses VXLAN tunnels." },
         };
 
-        var chunks = chunker.Chunk("Arista EOS Config Guide", sections);
+        var chunks = chunker.Chunk("Arista EOS Config Guide", sections).Leaves;
 
         chunks[0].Content.Should().Be(
             "Arista EOS Config Guide > BGP EVPN\n\nOverlay traffic uses VXLAN tunnels.");

@@ -135,6 +135,18 @@ public sealed class HybridRetriever : IHybridRetriever
         outerSpan?.SetTag(AristaActivity.Tags.RerankTopN, rerankTopN);
         outerSpan?.SetTag(AristaActivity.Tags.RerankAdaptive, rerankTopN < options.RerankTopN);
 
+        // Sprint 15: parent hydration. For leaves with a parent_chunk_id we
+        // pull the parent's raw_content in a single batch SELECT so the
+        // cross-encoder reranker scores against the richer section context.
+        // Leaves without a parent (legacy rows from before v0.2.5 reingest)
+        // fall back to leaf content — same shape, same wire format.
+        var distinctParentIds = topForRerank
+            .Where(f => f.Row.ParentChunkId.HasValue)
+            .Select(f => f.Row.ParentChunkId!.Value)
+            .Distinct()
+            .ToArray();
+        var parentTexts = await FetchParentTextsAsync(distinctParentIds, ct).ConfigureAwait(false);
+
         var rerankSw = Stopwatch.StartNew();
         IReadOnlyList<RerankResult> rerankResults;
         // Span closes when the scope block exits; do NOT also call Dispose()
@@ -142,7 +154,14 @@ public sealed class HybridRetriever : IHybridRetriever
         // span end timestamp. (Sprint 8 audit finding.)
         using (AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchRerank))
         {
-            var rerankInput = topForRerank.Select(f => new RerankCandidate(f.Row.ChunkId, f.Row.Content)).ToList();
+            var rerankInput = topForRerank.Select(f =>
+            {
+                var rerankText = f.Row.ParentChunkId is long pid
+                    && parentTexts.TryGetValue(pid, out var pt)
+                        ? pt
+                        : f.Row.RawContent;
+                return new RerankCandidate(f.Row.ChunkId, rerankText);
+            }).ToList();
             rerankResults = await _reranker.RerankAsync(expansion.Expanded, rerankInput, ct).ConfigureAwait(false);
         }
         rerankSw.Stop();
@@ -209,14 +228,20 @@ public sealed class HybridRetriever : IHybridRetriever
         CancellationToken ct)
     {
         using var span = AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchDense);
+        // Filter chunk_kind='leaf' so the dense path never returns parent
+        // rows (their embedding is NULL anyway, but the predicate also
+        // means the planner can stop after the first leaf-only HNSW probe
+        // on a partial index when one is added later).
         const string sql = """
             SELECT c.id, c.document_id, c.chunk_index, c.content, c.raw_content,
                    c.section_title, c.section_level, c.page_start, c.page_end,
+                   c.parent_chunk_id,
                    d.title, d.slug, d.category, d.product, d.version,
                    c.embedding <=> $1 AS distance
             FROM chunks c
             JOIN documents d ON d.id = c.document_id
-            WHERE ($2::text IS NULL OR d.category = $2)
+            WHERE c.chunk_kind = 'leaf'
+              AND ($2::text IS NULL OR d.category = $2)
               AND ($3::text IS NULL OR d.product = $3)
             ORDER BY c.embedding <=> $1
             LIMIT $4;
@@ -242,16 +267,21 @@ public sealed class HybridRetriever : IHybridRetriever
         CancellationToken ct)
     {
         using var span = AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchSparse);
+        // chunk_kind='leaf' filter mirrors the dense path. Without it, parent
+        // rows (which the BM25 trigger ALSO indexes since bm25v is populated
+        // for every row including parents) would surface in sparse results.
         const string sql = """
             SELECT c.id, c.document_id, c.chunk_index, c.content, c.raw_content,
                    c.section_title, c.section_level, c.page_start, c.page_end,
+                   c.parent_chunk_id,
                    d.title, d.slug, d.category, d.product, d.version,
                    c.bm25v <&> to_bm25query(
                        'idx_chunks_bm25'::regclass,
                        tokenizer_catalog.tokenize($1, 'chunks_tokenizer')::bm25vector) AS distance
             FROM chunks c
             JOIN documents d ON d.id = c.document_id
-            WHERE ($2::text IS NULL OR d.category = $2)
+            WHERE c.chunk_kind = 'leaf'
+              AND ($2::text IS NULL OR d.category = $2)
               AND ($3::text IS NULL OR d.product = $3)
             ORDER BY c.bm25v <&> to_bm25query(
                 'idx_chunks_bm25'::regclass,
@@ -289,15 +319,42 @@ public sealed class HybridRetriever : IHybridRetriever
                 SectionLevel: reader.IsDBNull(6) ? null : reader.GetInt16(6),
                 PageStart: reader.IsDBNull(7) ? null : reader.GetInt32(7),
                 PageEnd: reader.IsDBNull(8) ? null : reader.GetInt32(8),
-                DocumentTitle: reader.GetString(9),
-                DocumentSlug: reader.GetString(10),
-                Category: reader.GetString(11),
-                Product: reader.IsDBNull(12) ? null : reader.GetString(12),
-                Version: reader.IsDBNull(13) ? null : reader.GetString(13),
-                Distance: reader.GetFloat(14)));
+                ParentChunkId: reader.IsDBNull(9) ? null : reader.GetInt64(9),
+                DocumentTitle: reader.GetString(10),
+                DocumentSlug: reader.GetString(11),
+                Category: reader.GetString(12),
+                Product: reader.IsDBNull(13) ? null : reader.GetString(13),
+                Version: reader.IsDBNull(14) ? null : reader.GetString(14),
+                Distance: reader.GetFloat(15)));
         }
 
         return rows;
+    }
+
+    // Sprint 15: parent hydration. Pulls raw_content for the given parent
+    // chunk ids in a single batch select so the cross-encoder reranker can
+    // score (query, parent_text) instead of (query, leaf_text). One DB
+    // round-trip per search; tiny — typically 10-20 unique parents per
+    // query after rerank cap.
+    private async Task<Dictionary<long, string>> FetchParentTextsAsync(
+        long[] parentIds, CancellationToken ct)
+    {
+        var map = new Dictionary<long, string>(parentIds.Length);
+        if (parentIds.Length == 0)
+        {
+            return map;
+        }
+
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT id, raw_content FROM chunks WHERE id = ANY($1)";
+        cmd.Parameters.Add(new NpgsqlParameter<long[]> { TypedValue = parentIds });
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            map[reader.GetInt64(0)] = reader.GetString(1);
+        }
+        return map;
     }
 
     // If the top-5 RRF scores are within AdaptiveSpreadThreshold, candidates
@@ -398,6 +455,7 @@ public sealed class HybridRetriever : IHybridRetriever
         short? SectionLevel,
         int? PageStart,
         int? PageEnd,
+        long? ParentChunkId,
         string DocumentTitle,
         string DocumentSlug,
         string Category,

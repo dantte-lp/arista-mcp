@@ -30,6 +30,7 @@ public class AristaDbContext(DbContextOptions<AristaDbContext> options) : DbCont
         {
             e.HasKey(c => c.Id);
             e.Property(c => c.CreatedAt).HasDefaultValueSql("now()");
+            e.Property(c => c.ChunkKind).HasDefaultValue("leaf");
             e.HasIndex(c => new { c.DocumentId, c.ChunkIndex }).IsUnique();
             e.HasIndex(c => c.DocumentId);
             e.HasIndex(c => c.SectionLevel).HasFilter("section_level IS NOT NULL");
@@ -38,6 +39,18 @@ public class AristaDbContext(DbContextOptions<AristaDbContext> options) : DbCont
                 .HasOperators("halfvec_cosine_ops")
                 .HasStorageParameter("m", 16)
                 .HasStorageParameter("ef_construction", 200);
+            // Sprint 15: parent-child chunking.
+            e.HasIndex(c => c.ParentChunkId)
+                .HasDatabaseName("idx_chunks_parent_chunk_id")
+                .HasFilter("parent_chunk_id IS NOT NULL");
+            e.HasIndex(c => c.ChunkKind).HasDatabaseName("idx_chunks_kind");
+            e.ToTable(t => t.HasCheckConstraint(
+                "ck_chunks_chunk_kind",
+                "chunk_kind IN ('leaf', 'parent')"));
+            e.HasOne(c => c.Parent)
+                .WithMany()
+                .HasForeignKey(c => c.ParentChunkId)
+                .OnDelete(DeleteBehavior.Cascade);
             e.HasOne(c => c.Document)
                 .WithMany()
                 .HasForeignKey(c => c.DocumentId)

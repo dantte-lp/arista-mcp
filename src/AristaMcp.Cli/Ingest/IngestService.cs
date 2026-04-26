@@ -166,35 +166,74 @@ public sealed class IngestService(
                 return (0, $"placeholder doc ({totalBodyChars} body chars) — skipped");
             }
 
-            var drafts = chunker.Chunk(loaded.Metadata.Title, loaded.Sections);
-            if (drafts.Count == 0)
+            var chunkSet = chunker.Chunk(loaded.Metadata.Title, loaded.Sections);
+            var totalDrafts = chunkSet.Parents.Count + chunkSet.Leaves.Count;
+            if (totalDrafts == 0)
             {
                 return (0, "no chunks produced");
             }
 
             if (options.DryRun)
             {
-                return (drafts.Count, null);
+                return (totalDrafts, null);
             }
 
-            // doc metadata + chunk wipe happen once — the sub-batch loop below
-            // only inserts. If a later sub-batch fails we'll leave a doc with
-            // partial chunks; the next `ingest --force` (or an unchanged sha
-            // re-run after fix) will hit DeleteByDocument again and restart.
+            // doc metadata + chunk wipe happen once. The two-pass insert
+            // below writes parents first (no embedder calls), reads back
+            // their DB ids ordered by chunk_index, patches leaves with
+            // parent_chunk_id, then runs the sub-batched embed +
+            // BulkInsert loop on leaves.
             await docRepo.UpsertAsync(loaded.Metadata, ct).ConfigureAwait(false);
             await chunkRepo.DeleteByDocumentAsync(entry.Id, ct).ConfigureAwait(false);
 
-            var subBatchSize = Math.Max(1, options.ChunkSubBatchSize);
-            var totalDrafts = drafts.Count;
             docSpan?.SetTag(AristaActivity.Tags.ChunkCount, totalDrafts);
 
-            var inserted = 0;
+            // Pass 1 — parents (no embedding). chunk_index = 0..ParentCount-1.
+            var parentRows = new List<AristaChunk>(chunkSet.Parents.Count);
+            for (var i = 0; i < chunkSet.Parents.Count; i++)
+            {
+                var p = chunkSet.Parents[i];
+                parentRows.Add(new AristaChunk
+                {
+                    DocumentId = entry.Id,
+                    ChunkIndex = i,
+                    Content = p.Content,
+                    RawContent = p.RawContent,
+                    SectionTitle = p.SectionTitle,
+                    SectionLevel = p.SectionLevel,
+                    PageStart = p.PageStart,
+                    PageEnd = p.PageEnd,
+                    TokenCount = p.TokenCount,
+                    ChunkKind = ChunkKind.Parent,
+                    Embedding = null,
+                    EmbeddingModel = null,
+                });
+            }
+            await chunkRepo.BulkInsertAsync(parentRows, ct).ConfigureAwait(false);
+
+            // Read parent ids back, ordered by chunk_index ascending — that
+            // matches the order they were inserted, so parent index N from
+            // the chunker maps to parentIds[N].
+            var parentIds = await chunkRepo.SelectParentIdsAsync(entry.Id, ct).ConfigureAwait(false);
+            if (parentIds.Count != chunkSet.Parents.Count)
+            {
+                return (0,
+                    $"parent insert/readback mismatch: expected {chunkSet.Parents.Count}, got {parentIds.Count}");
+            }
+
+            // Pass 2 — leaves, embedded and inserted in sub-batches. chunk_index
+            // continues from ParentCount so the (document_id, chunk_index)
+            // unique constraint stays satisfied across the two passes.
+            var subBatchSize = Math.Max(1, options.ChunkSubBatchSize);
+            var leafCount = chunkSet.Leaves.Count;
+
+            var inserted = parentRows.Count;
             var subBatchIndex = 0;
-            var subBatchTotal = (totalDrafts + subBatchSize - 1) / subBatchSize;
-            for (var start = 0; start < totalDrafts; start += subBatchSize)
+            var subBatchTotal = (leafCount + subBatchSize - 1) / subBatchSize;
+            for (var start = 0; start < leafCount; start += subBatchSize)
             {
                 ct.ThrowIfCancellationRequested();
-                var end = Math.Min(start + subBatchSize, totalDrafts);
+                var end = Math.Min(start + subBatchSize, leafCount);
                 using var subSpan = AristaActivity.Source.StartActivity(AristaActivity.Operations.IngestSubBatch);
                 subSpan?.SetTag(AristaActivity.Tags.SubBatchIndex, subBatchIndex);
                 subSpan?.SetTag(AristaActivity.Tags.SubBatchTotal, subBatchTotal);
@@ -202,7 +241,7 @@ public sealed class IngestService(
                 var slice = new List<ChunkDraft>(end - start);
                 for (var k = start; k < end; k++)
                 {
-                    slice.Add(drafts[k]);
+                    slice.Add(chunkSet.Leaves[k]);
                 }
 
                 var texts = slice.Select(d => d.Content).ToList();
@@ -212,10 +251,14 @@ public sealed class IngestService(
                 for (var j = 0; j < slice.Count; j++)
                 {
                     var d = slice[j];
+                    long? parentChunkId = d.ParentIndex is int pi
+                        && pi >= 0 && pi < parentIds.Count
+                        ? parentIds[pi]
+                        : null;
                     chunks.Add(new AristaChunk
                     {
                         DocumentId = entry.Id,
-                        ChunkIndex = start + j,
+                        ChunkIndex = parentRows.Count + start + j,
                         Content = d.Content,
                         RawContent = d.RawContent,
                         SectionTitle = d.SectionTitle,
@@ -223,16 +266,15 @@ public sealed class IngestService(
                         PageStart = d.PageStart,
                         PageEnd = d.PageEnd,
                         TokenCount = d.TokenCount,
+                        ChunkKind = ChunkKind.Leaf,
+                        ParentChunkId = parentChunkId,
                         Embedding = vectors[j],
                     });
                 }
 
                 inserted += await chunkRepo.BulkInsertAsync(chunks, ct).ConfigureAwait(false);
 
-                // Only surface sub-batch progress for docs that actually split.
-                // Normal-sized docs log nothing extra — keeps Sprint 6 output
-                // shape stable in the 99 % case.
-                if (totalDrafts > subBatchSize)
+                if (leafCount > subBatchSize)
                 {
                     progress.Log(
                         $"  {entry.Slug}: sub-batch {inserted}/{totalDrafts} chunks");
