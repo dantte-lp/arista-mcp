@@ -127,7 +127,8 @@ public static class BenchCommand
         using IReranker reranker = BuildReranker(modelsDir, settings.Gpu);
         var hyde = ServerHosting.BuildHyde(settings);
         var multiQuery = ServerHosting.BuildMultiQuery(settings);
-        var retriever = new HybridRetriever(embedder, reranker, ds, hyde, multiQuery);
+        var listwise = ServerHosting.BuildListwise(settings);
+        var retriever = new HybridRetriever(embedder, reranker, ds, hyde, multiQuery, listwise);
 
         var rows = new List<BenchRow>(set.Queries.Count);
 

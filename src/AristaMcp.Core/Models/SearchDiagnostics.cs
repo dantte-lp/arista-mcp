@@ -15,4 +15,8 @@ public sealed record SearchDiagnostics(
     // or when disabled, so default-args keep pre-HyDE callers compiling.
     double HydeMs = 0,
     bool HydeHit = false,
-    bool HydeFallback = false);
+    bool HydeFallback = false,
+    // Sprint 16: listwise top-5 LLM re-rank timing.
+    double ListwiseMs = 0,
+    bool ListwiseHit = false,
+    bool ListwiseFallback = false);

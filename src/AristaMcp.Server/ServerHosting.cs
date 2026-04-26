@@ -39,6 +39,7 @@ public static class ServerHosting
         services.AddSingleton<IReranker>(_ => BuildReranker(settings));
         services.AddSingleton<IHydeExpander>(_ => BuildHyde(settings));
         services.AddSingleton<IMultiQueryExpander>(_ => BuildMultiQuery(settings));
+        services.AddSingleton<IListwiseReranker>(_ => BuildListwise(settings));
 
         services.AddScoped<IDocumentRepository, DocumentRepository>();
         services.AddScoped<IChunkRepository>(sp => new ChunkRepository(
@@ -51,7 +52,8 @@ public static class ServerHosting
             sp.GetRequiredService<IReranker>(),
             sp.GetRequiredService<NpgsqlDataSource>(),
             sp.GetRequiredService<IHydeExpander>(),
-            sp.GetRequiredService<IMultiQueryExpander>()));
+            sp.GetRequiredService<IMultiQueryExpander>(),
+            sp.GetRequiredService<IListwiseReranker>()));
 
         // Opt-in: registers OpenTelemetry tracing + OTLP exporter IF any of
         // ARISTA_MCP__Otel__Endpoint or OTEL_EXPORTER_OTLP_ENDPOINT is set.
@@ -114,6 +116,24 @@ public static class ServerHosting
         return settings.MultiQuery.Enabled
             ? new MultiQueryExpander()
             : new NoopMultiQueryExpander();
+    }
+
+    // Listwise reranker factory. Off by default; opt-in via
+    // ARISTA_MCP__ListwiseRerank__Enabled=true. Shares the llama.cpp
+    // sidecar with HyDE; HTTP timeout is sized to the per-request
+    // ListwiseRerank.TimeoutMs plus a 1 s connection-handshake budget.
+    public static IListwiseReranker BuildListwise(AristaMcpSettings settings)
+    {
+        if (!settings.ListwiseRerank.Enabled)
+        {
+            return new NoopListwiseReranker();
+        }
+
+        var http = new HttpClient
+        {
+            Timeout = TimeSpan.FromMilliseconds(settings.ListwiseRerank.TimeoutMs + 1000),
+        };
+        return new LlamaCppListwiseReranker(http, settings.ListwiseRerank, TimeProvider.System);
     }
 
     private static OnnxEmbedder BuildEmbedder(AristaMcpSettings settings)

@@ -36,4 +36,8 @@ public sealed class AristaMcpSettings
 
     // Sprint 15: rule-based multi-query expansion for dense retrieval.
     public MultiQuerySettings MultiQuery { get; set; } = new();
+
+    // Sprint 16: listwise re-rank of the cross-encoder's top-5 via a
+    // local llama.cpp-served instruction-tuned model.
+    public ListwiseRerankSettings ListwiseRerank { get; set; } = new();
 }

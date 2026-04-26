@@ -31,13 +31,15 @@ public sealed class HybridRetriever : IHybridRetriever
     private readonly NpgsqlDataSource _dataSource;
     private readonly IHydeExpander _hyde;
     private readonly IMultiQueryExpander _multiQuery;
+    private readonly IListwiseReranker _listwise;
 
     public HybridRetriever(
         IEmbedder embedder,
         IReranker reranker,
         NpgsqlDataSource dataSource,
         IHydeExpander? hyde = null,
-        IMultiQueryExpander? multiQuery = null)
+        IMultiQueryExpander? multiQuery = null,
+        IListwiseReranker? listwise = null)
     {
         ArgumentNullException.ThrowIfNull(embedder);
         ArgumentNullException.ThrowIfNull(reranker);
@@ -47,6 +49,7 @@ public sealed class HybridRetriever : IHybridRetriever
         _dataSource = dataSource;
         _hyde = hyde ?? new NoopHydeExpander();
         _multiQuery = multiQuery ?? new NoopMultiQueryExpander();
+        _listwise = listwise ?? new NoopListwiseReranker();
     }
 
     // Size is deliberately small — retrieval workloads have tight hot-sets
@@ -167,8 +170,80 @@ public sealed class HybridRetriever : IHybridRetriever
         rerankSw.Stop();
 
         var rerankScore = rerankResults.ToDictionary(r => r.ChunkId, r => r.Score);
-        var reranked = topForRerank
-            .OrderByDescending(f => rerankScore.TryGetValue(f.Row.ChunkId, out var s) ? s : 0f);
+        var rerankedList = topForRerank
+            .OrderByDescending(f => rerankScore.TryGetValue(f.Row.ChunkId, out var s) ? s : 0f)
+            .ToList();
+
+        // Sprint 16: listwise re-rank of the cross-encoder's top-N. Skip
+        // when the implementation reports MaxCandidates=0 (Noop or
+        // disabled). Listwise sees parent text just like the cross-encoder
+        // — the same content the LLM would have most signal on.
+        IReadOnlyList<FusedCandidate> reranked = rerankedList;
+        var listwiseLatencyMs = 0d;
+        var listwiseHit = false;
+        var listwiseFallback = false;
+        if (_listwise.MaxCandidates > 0 && rerankedList.Count > 1)
+        {
+            var sliceCount = Math.Min(_listwise.MaxCandidates, rerankedList.Count);
+            var listwiseInput = new List<RerankCandidate>(sliceCount);
+            for (var i = 0; i < sliceCount; i++)
+            {
+                var row = rerankedList[i].Row;
+                var text = row.ParentChunkId is long pid
+                    && parentTexts.TryGetValue(pid, out var pt)
+                        ? pt
+                        : row.RawContent;
+                listwiseInput.Add(new RerankCandidate(row.ChunkId, text));
+            }
+
+            using (AristaActivity.Source.StartActivity(AristaActivity.Operations.SearchRerank))
+            {
+                var listwiseResult = await _listwise.ReorderAsync(
+                    expansion.Expanded, listwiseInput, ct).ConfigureAwait(false);
+                listwiseLatencyMs = listwiseResult.LatencyMs;
+                listwiseHit = listwiseResult.CacheHit;
+                listwiseFallback = listwiseResult.UsedFallback;
+
+                if (!listwiseFallback)
+                {
+                    // Reorder the prefix by the LLM's permutation; the tail
+                    // beyond MaxCandidates keeps cross-encoder order.
+                    var byId = new Dictionary<long, FusedCandidate>(sliceCount);
+                    for (var i = 0; i < sliceCount; i++)
+                    {
+                        byId[rerankedList[i].Row.ChunkId] = rerankedList[i];
+                    }
+                    var newPrefix = new List<FusedCandidate>(sliceCount);
+                    foreach (var id in listwiseResult.OrderedChunkIds)
+                    {
+                        if (byId.Remove(id, out var f))
+                        {
+                            newPrefix.Add(f);
+                        }
+                    }
+                    // Defensive: any candidate the LLM dropped goes to the
+                    // end of the prefix in cross-encoder order.
+                    if (byId.Count > 0)
+                    {
+                        for (var i = 0; i < sliceCount; i++)
+                        {
+                            if (byId.ContainsKey(rerankedList[i].Row.ChunkId))
+                            {
+                                newPrefix.Add(rerankedList[i]);
+                            }
+                        }
+                    }
+
+                    var stitched = new List<FusedCandidate>(rerankedList.Count);
+                    stitched.AddRange(newPrefix);
+                    for (var i = sliceCount; i < rerankedList.Count; i++)
+                    {
+                        stitched.Add(rerankedList[i]);
+                    }
+                    reranked = stitched;
+                }
+            }
+        }
 
         var ranked = options.DedupPerSection
             ? DedupPerSection(reranked).Take(options.Limit).ToList()
@@ -190,7 +265,10 @@ public sealed class HybridRetriever : IHybridRetriever
             TotalMs: total.Elapsed.TotalMilliseconds,
             HydeMs: hyde.LatencyMs,
             HydeHit: hyde.CacheHit,
-            HydeFallback: hyde.UsedFallback);
+            HydeFallback: hyde.UsedFallback,
+            ListwiseMs: listwiseLatencyMs,
+            ListwiseHit: listwiseHit,
+            ListwiseFallback: listwiseFallback);
 
         outerSpan?.SetTag(AristaActivity.Tags.DenseHits, denseRows.Count);
         outerSpan?.SetTag(AristaActivity.Tags.SparseHits, sparseRows.Count);
