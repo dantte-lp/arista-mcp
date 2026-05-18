@@ -17,12 +17,12 @@
     <PackageVersion Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.6" />
     <!-- EF Core pinned to 9.x — Pgvector.EntityFrameworkCore 0.3.0 (latest) requires Npgsql.EFCore 9.0.1. -->
     <!-- Bump when Pgvector.EntityFrameworkCore releases an EF Core 10 compatible version. -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="9.0.15" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.15" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.8" />
     <!-- Direct pin: Pgvector.EFCore 0.3.0 pulls EF.Relational 9.0.1 transitively; we
          must force 9.0.15 into the publish output, otherwise runtime binding fails
          because .deps.json advertises 9.0.15 against a 9.0.1 physical asset. -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.15" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.8" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
     <PackageVersion Include="Pgvector" Version="0.3.2" />
     <PackageVersion Include="Pgvector.EntityFrameworkCore" Version="0.3.0" />
