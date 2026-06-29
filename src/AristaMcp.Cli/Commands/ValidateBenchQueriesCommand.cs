@@ -128,7 +128,7 @@ public static class ValidateBenchQueriesCommand
             VocabPath = embedderVocab,
             Gpu = settings.Gpu,
         });
-        using IReranker reranker = BuildReranker(modelsDir, settings.Gpu);
+        using IReranker reranker = BuildReranker(ModelPaths.RerankerDir(settings), settings.Gpu);
         var hyde = ServerHosting.BuildHyde(settings);
         var multiQuery = ServerHosting.BuildMultiQuery(settings);
         var listwise = ServerHosting.BuildListwise(settings);
@@ -189,22 +189,22 @@ public static class ValidateBenchQueriesCommand
         return kept > 0 ? 0 : 1;
     }
 
-    private static IReranker BuildReranker(string modelsDir, bool gpu)
+    private static IReranker BuildReranker(string rerankerDir, bool gpu)
     {
-        var family = RerankerFamilyDetector.Detect(modelsDir);
-        var modelPath = ModelPaths.RerankerModel(modelsDir);
+        var family = RerankerFamilyDetector.Detect(rerankerDir);
+        var modelPath = ModelPaths.RerankerModel(rerankerDir);
         return family switch
         {
             RerankerTokenizerFamily.XlmRobertaSentencePiece => new XlmRobertaOnnxReranker(new RerankerOptions
             {
                 ModelPath = modelPath,
-                VocabPath = ModelPaths.RerankerSpm(modelsDir),
+                VocabPath = ModelPaths.RerankerSpm(rerankerDir),
                 Gpu = gpu,
             }),
             RerankerTokenizerFamily.BertWordPiece => new OnnxReranker(new RerankerOptions
             {
                 ModelPath = modelPath,
-                VocabPath = ModelPaths.RerankerVocab(modelsDir),
+                VocabPath = ModelPaths.RerankerVocab(rerankerDir),
                 Gpu = gpu,
             }),
             _ => new NoopReranker(),

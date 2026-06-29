@@ -25,9 +25,16 @@ EnvironmentFile=/etc/arista-mcp.env
 # image build. Read-only — the server only reads the ONNX assets.
 Volume=%h/.local/share/arista-mcp/models:/var/lib/arista-mcp/models:Z,ro
 
-# No HealthCmd= — arista-mcp has no /healthz endpoint yet. systemd
-# Restart=on-failure below covers process crashes; add a HealthCmd once
-# the server exposes a probe.
+# Liveness probe — `arista-mcp serve --transport http` exposes
+# `/v1/healthz` via Microsoft.AspNetCore.Diagnostics.HealthChecks
+# (registered in src/AristaMcp.Server/HttpHost.cs). Containers without
+# curl can use wget; the chiseled .NET 10 runtime-deps:noble-chiseled-extra
+# base image ships curl. Tune intervals via .container.d/ drop-ins.
+HealthCmd=curl --fail --silent http://127.0.0.1:8080/v1/healthz
+HealthInterval=15s
+HealthRetries=5
+HealthStartPeriod=60s
+HealthTimeout=10s
 
 AutoUpdate=registry
 Label=io.containers.autoupdate=registry

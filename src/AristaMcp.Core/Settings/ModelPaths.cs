@@ -15,13 +15,24 @@ public static class ModelPaths
     public static string EmbedderVocab(AristaMcpSettings settings) =>
         Path.Combine(settings.ModelsDir, "embedder", "vocab.txt");
 
-    public static string RerankerModel(string modelsDir) =>
-        Path.Combine(modelsDir, "reranker", "model.onnx");
+    // Effective reranker directory — honours the `RerankerDir` override on
+    // AristaMcpSettings when set (production INT8 fine-tune path), falls back
+    // to `{ModelsDir}/reranker` otherwise. The string-taking overloads below
+    // remain for callers that pre-resolve the directory; new code should
+    // prefer the settings-taking overload so `RerankerDir` is honoured
+    // uniformly.
+    public static string RerankerDir(AristaMcpSettings settings) =>
+        !string.IsNullOrWhiteSpace(settings.RerankerDir)
+            ? settings.RerankerDir
+            : Path.Combine(settings.ModelsDir, "reranker");
 
-    public static string RerankerVocab(string modelsDir) =>
-        Path.Combine(modelsDir, "reranker", "vocab.txt");
+    public static string RerankerModel(string rerankerDir) =>
+        Path.Combine(rerankerDir, "model.onnx");
+
+    public static string RerankerVocab(string rerankerDir) =>
+        Path.Combine(rerankerDir, "vocab.txt");
 
     // SentencePiece BPE model used by XLM-RoBERTa / bge-reranker-* cross-encoders.
-    public static string RerankerSpm(string modelsDir) =>
-        Path.Combine(modelsDir, "reranker", "sentencepiece.bpe.model");
+    public static string RerankerSpm(string rerankerDir) =>
+        Path.Combine(rerankerDir, "sentencepiece.bpe.model");
 }

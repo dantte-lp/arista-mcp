@@ -69,21 +69,25 @@ public static class ServerHosting
     // NoopReranker so serve stays usable with no reranker asset installed.
     private static IReranker BuildReranker(AristaMcpSettings settings)
     {
-        var family = RerankerFamilyDetector.Detect(settings.ModelsDir);
-        var modelPath = ModelPaths.RerankerModel(settings.ModelsDir);
+        // ModelPaths.RerankerDir picks the RerankerDir override on settings
+        // when set (production INT8 fine-tune path) and falls back to the
+        // default reranker subdirectory under ModelsDir otherwise.
+        var rerankerDir = ModelPaths.RerankerDir(settings);
+        var family = RerankerFamilyDetector.Detect(rerankerDir);
+        var modelPath = ModelPaths.RerankerModel(rerankerDir);
 
         return family switch
         {
             RerankerTokenizerFamily.XlmRobertaSentencePiece => new XlmRobertaOnnxReranker(new RerankerOptions
             {
                 ModelPath = modelPath,
-                VocabPath = ModelPaths.RerankerSpm(settings.ModelsDir),
+                VocabPath = ModelPaths.RerankerSpm(rerankerDir),
                 Gpu = settings.Gpu,
             }),
             RerankerTokenizerFamily.BertWordPiece => new OnnxReranker(new RerankerOptions
             {
                 ModelPath = modelPath,
-                VocabPath = ModelPaths.RerankerVocab(settings.ModelsDir),
+                VocabPath = ModelPaths.RerankerVocab(rerankerDir),
                 Gpu = settings.Gpu,
             }),
             _ => new NoopReranker(),

@@ -11,6 +11,14 @@ public sealed class AristaMcpSettings
     public string ConnectionString { get; set; } =
         "Host=localhost;Port=5434;Database=arista;Username=arista;Password=arista";
     public string ModelsDir { get; set; } = "models";
+
+    // Override for the reranker model directory. Falls back to {ModelsDir}/reranker
+    // when null. Production override for the v0.3.0 bge-reranker-v2-m3 INT8
+    // fine-tune (or any side-by-side experimental reranker):
+    //   ARISTA_MCP__RerankerDir=/var/lib/arista-mcp/models/reranker-v2m3-int8
+    // See deploy/systemd/arista-mcp.env.example.
+    public string? RerankerDir { get; set; }
+
     public string EmbeddingModel { get; set; } = "snowflake-arctic-embed-m-v1.5";
     public int EmbeddingDim { get; set; } = 768;
 
@@ -25,7 +33,6 @@ public sealed class AristaMcpSettings
     public McpTransport Transport { get; set; } = McpTransport.Stdio;
     public int HttpPort { get; set; } = 8080;
     public int IngestBatchSize { get; set; } = 32;
-    public int IngestParallelism { get; set; } = 4;
     public int ChunkMaxTokens { get; set; } = 1200;
     public int ChunkTargetTokens { get; set; } = 512;
     public int ChunkOverlapTokens { get; set; } = 64;

@@ -4,7 +4,6 @@ using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
-using AristaMcp.Cli.Configuration;
 using Spectre.Console;
 
 namespace AristaMcp.Cli.Commands;
@@ -218,9 +217,12 @@ public static class BootstrapCommand
     private static async Task<int> EnsurePostgresAsync(
         string runtime, BootstrapArgs args, IAnsiConsole console, CancellationToken ct)
     {
-        int existsCode = await RunSilentAsync(
-            runtime, $"container exists {args.ContainerName}", ct).ConfigureAwait(false);
-        if (existsCode == 0)
+        // `podman container exists` returns exit 0/1; the Docker CLI has no such
+        // subcommand. Use `ps -aq --filter name=^X$` instead — works on both
+        // runtimes; non-empty stdout means the container exists.
+        string existing = await RunSilentReadStdoutAsync(
+            runtime, $"ps -aq --filter name=^{args.ContainerName}$", ct).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(existing))
         {
             console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
                 $"  pg       [green]container exists[/]: {args.ContainerName} (starting if stopped)");
@@ -298,47 +300,66 @@ public static class BootstrapCommand
             $"  corpus   downloading [green]{url}[/]");
 
         string tmpHostPath = Path.Combine(Path.GetTempPath(), $"arista-corpus-{version}.dump");
-        await DownloadFileAsync(url, tmpHostPath, console, ct).ConfigureAwait(false);
-
-        // Copy into the container.
-        await RunStreamingAsync(runtime, $"cp \"{tmpHostPath}\" \"{args.ContainerName}:/tmp/arista-corpus.dump\"",
-            console, ct).ConfigureAwait(false);
-
-        console.MarkupLine("  corpus   running pg_restore inside the container");
-        // --clean drops existing schema, --if-exists tolerates a fresh DB.
-        // -j 4 parallelises restore; HNSW index rebuild may still serialize.
-#pragma warning disable S2068 // Const credential — see DefaultPgPassword docstring.
-        string restoreArgs = string.Join(' ',
-            $"exec -e PGPASSWORD={DefaultPgPassword} {args.ContainerName}",
-            $"pg_restore -h 127.0.0.1 -U {DefaultUser} -d {DefaultDatabase}",
-            "--no-owner --no-acl --clean --if-exists -j 4",
-            "/tmp/arista-corpus.dump");
-#pragma warning restore S2068
-        int code = await RunStreamingAsync(runtime, restoreArgs, console, ct).ConfigureAwait(false);
-        if (code != 0)
+        try
         {
-            console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
-                $"[yellow]warn[/] pg_restore exit {code} — typical for HNSW shared-mem ENOSPC; retrying serially");
-            // Drop+recreate the HNSW index serially with no parallel
-            // workers (avoids /dev/shm exhaustion on small containers).
-            string hnswSql = "SET maintenance_work_mem = '4GB'; SET max_parallel_maintenance_workers = 0; " +
-                "DROP INDEX IF EXISTS \\\"IX_chunks_embedding\\\"; " +
-                "CREATE INDEX \\\"IX_chunks_embedding\\\" ON chunks USING hnsw (embedding halfvec_cosine_ops) " +
-                "WITH (ef_construction=200, m=16);";
-#pragma warning disable S2068
-            await RunStreamingAsync(runtime,
-                $"exec -e PGPASSWORD={DefaultPgPassword} {args.ContainerName} " +
-                $"psql -U {DefaultUser} -d {DefaultDatabase} -c \"{hnswSql}\"",
-                console, ct).ConfigureAwait(false);
-#pragma warning restore S2068
-        }
+            await DownloadFileAsync(url, tmpHostPath, console, ct).ConfigureAwait(false);
 
-        // Cleanup.
-        await RunSilentAsync(runtime,
-            $"exec {args.ContainerName} rm -f /tmp/arista-corpus.dump", ct).ConfigureAwait(false);
-        File.Delete(tmpHostPath);
-        console.MarkupLine("  corpus   [green]restored[/]");
-        return 0;
+            // Copy into the container.
+            await RunStreamingAsync(runtime, $"cp \"{tmpHostPath}\" \"{args.ContainerName}:/tmp/arista-corpus.dump\"",
+                console, ct).ConfigureAwait(false);
+
+            console.MarkupLine("  corpus   running pg_restore inside the container");
+            // --clean drops existing schema, --if-exists tolerates a fresh DB.
+            // -j 4 parallelises restore; HNSW index rebuild may still serialize.
+#pragma warning disable S2068 // Const credential — see DefaultPgPassword docstring.
+            string restoreArgs = string.Join(' ',
+                $"exec -e PGPASSWORD={DefaultPgPassword} {args.ContainerName}",
+                $"pg_restore -h 127.0.0.1 -U {DefaultUser} -d {DefaultDatabase}",
+                "--no-owner --no-acl --clean --if-exists -j 4",
+                "/tmp/arista-corpus.dump");
+#pragma warning restore S2068
+            int code = await RunStreamingAsync(runtime, restoreArgs, console, ct).ConfigureAwait(false);
+            if (code != 0)
+            {
+                console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
+                    $"[yellow]warn[/] pg_restore exit {code} — typical for HNSW shared-mem ENOSPC; retrying serially");
+                // Drop+recreate the HNSW index serially with no parallel
+                // workers (avoids /dev/shm exhaustion on small containers).
+                string hnswSql = "SET maintenance_work_mem = '4GB'; SET max_parallel_maintenance_workers = 0; " +
+                    "DROP INDEX IF EXISTS \\\"IX_chunks_embedding\\\"; " +
+                    "CREATE INDEX \\\"IX_chunks_embedding\\\" ON chunks USING hnsw (embedding halfvec_cosine_ops) " +
+                    "WITH (ef_construction=200, m=16);";
+#pragma warning disable S2068
+                int hnswRc = await RunStreamingAsync(runtime,
+                    $"exec -e PGPASSWORD={DefaultPgPassword} {args.ContainerName} " +
+                    $"psql -U {DefaultUser} -d {DefaultDatabase} -c \"{hnswSql}\"",
+                    console, ct).ConfigureAwait(false);
+#pragma warning restore S2068
+                if (hnswRc != 0)
+                {
+                    console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
+                        $"[red]error[/] serial HNSW index rebuild failed (exit {hnswRc}); dense search will return no results until the index is rebuilt manually.");
+                    return hnswRc;
+                }
+            }
+            console.MarkupLine("  corpus   [green]restored[/]");
+            return 0;
+        }
+        finally
+        {
+            // Cleanup must happen even on download / pg_restore failure — otherwise
+            // a partial dump leaks into Path.GetTempPath() and into the container's
+            // /tmp on repeated bootstrap attempts. Use a fresh CancellationToken so
+            // a cancelled outer operation does not block cleanup itself.
+            await RunSilentAsync(runtime,
+                $"exec {args.ContainerName} rm -f /tmp/arista-corpus.dump", CancellationToken.None).ConfigureAwait(false);
+            if (File.Exists(tmpHostPath))
+            {
+                try { File.Delete(tmpHostPath); }
+                catch (IOException) { /* best-effort cleanup */ }
+                catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+            }
+        }
     }
 
     private static async Task<int> InstallQuadletAsync(IAnsiConsole console, CancellationToken ct)
@@ -458,13 +479,68 @@ public static class BootstrapCommand
             {
                 return -1;
             }
-            await p.WaitForExitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await p.WaitForExitAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Don't leave a half-finished podman exec / pg_isready process
+                // running in the background — kill the whole tree so the next
+                // bootstrap attempt isn't blocked by a stale child.
+                try { p.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { /* already exited */ }
+                throw;
+            }
             return p.ExitCode;
         }
         catch (System.ComponentModel.Win32Exception)
         {
             // Executable not found.
             return -1;
+        }
+    }
+
+    // Variant of RunSilentAsync that captures stdout — needed because we use
+    // `docker ps -q --filter name=…` for portable container-existence checks:
+    // both podman and docker exit 0 when ps succeeds, and we have to inspect
+    // stdout (empty == not found, container-id == found) to tell the cases apart.
+    private static async Task<string> RunSilentReadStdoutAsync(string file, string args, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo(file, args)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        try
+        {
+            using var p = Process.Start(psi);
+            if (p is null)
+            {
+                return string.Empty;
+            }
+            // Read stdout before waiting for exit so we don't deadlock if the
+            // child writes more than the pipe buffer.
+            var stdoutTask = p.StandardOutput.ReadToEndAsync(ct);
+            try
+            {
+                await p.WaitForExitAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                try { p.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { /* already exited */ }
+                throw;
+            }
+            return p.ExitCode == 0
+                ? (await stdoutTask.ConfigureAwait(false)).Trim()
+                : string.Empty;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return string.Empty;
         }
     }
 
@@ -498,9 +574,18 @@ public static class BootstrapCommand
         };
         p.BeginOutputReadLine();
         p.BeginErrorReadLine();
-        await p.WaitForExitAsync(ct).ConfigureAwait(false);
-        // Suppress unused field warning on the loaded settings ctor.
-        _ = CliConfiguration.Load();
+        try
+        {
+            await p.WaitForExitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Kill the whole tree so an interrupted pg_restore / podman pull
+            // doesn't keep running past the abandoned bootstrap.
+            try { p.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { /* already exited */ }
+            throw;
+        }
         return p.ExitCode;
     }
 }

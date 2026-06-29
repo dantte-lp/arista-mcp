@@ -49,6 +49,23 @@ HealthTimeout=5s
 AutoUpdate=registry
 Label=io.containers.autoupdate=registry
 
+# Postgres command-line — MIRRORS docker/compose.yaml exactly. The tensorchord
+# vchord-suite image bundles the extensions but does NOT preset
+# `shared_preload_libraries`, so `CREATE EXTENSION vchord` in init.sql fails
+# at first start unless we add it explicitly. Memory tuning is mandatory:
+# full-corpus HNSW index rebuild OOMs at the PG default (128 MB shared_buffers).
+Exec=postgres \
+  -c shared_preload_libraries=vector,vchord,vchord_bm25,pg_tokenizer \
+  -c max_connections=20 \
+  -c shared_buffers=2GB \
+  -c effective_cache_size=8GB \
+  -c work_mem=256MB \
+  -c maintenance_work_mem=4GB \
+  -c max_wal_size=4GB \
+  -c wal_buffers=64MB \
+  -c io_method=worker \
+  -c io_workers=3
+
 # Resource hints — tune via /etc/containers/systemd/arista-mcp-postgres.container.d/
 # drop-ins instead of editing this file in-place.
 PodmanArgs=--shm-size=2g

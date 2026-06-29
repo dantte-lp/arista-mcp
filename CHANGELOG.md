@@ -8,7 +8,122 @@ Dates use ISO-8601.
 
 ## [Unreleased]
 
-_(no entries yet)_
+### Added
+
+- **`AristaMcpSettings.RerankerDir`** override — `deploy/systemd/arista-mcp.env.example`
+  has documented `ARISTA_MCP__RERANKERDIR` since v0.3.x, but the property was
+  missing from settings (silent ignore). Now wired through `ModelPaths.RerankerDir`
+  + `ServerHosting.BuildReranker` + the three CLI commands (`bench`,
+  `curate-triples`, `validate-bench-queries`). Regression-guarded by
+  `CliConfigurationTests.RerankerDir_env_var_is_bound_to_settings`.
+- **`/v1/healthz`** liveness endpoint on the Streamable-HTTP transport
+  (`src/AristaMcp.Server/HttpHost.cs`, via
+  `Microsoft.AspNetCore.Diagnostics.HealthChecks`). Plain 200 OK
+  process-liveness check consumed by `deploy/quadlet/arista-mcp.container`'s
+  new `HealthCmd=curl --fail --silent http://127.0.0.1:8080/v1/healthz`.
+  Backend-status reporting stays the responsibility of the `get_status`
+  MCP tool.
+- **`Exec=postgres -c shared_preload_libraries=…`** in
+  `deploy/quadlet/arista-mcp-postgres.container` plus the full memory
+  tuning block from `docker/compose.yaml`. Without this the Quadlet PG
+  pod fails `CREATE EXTENSION vchord` on first start (the
+  `tensorchord/vchord-suite` image bundles the libraries but does NOT
+  preset them).
+- **`AristaMcp.Cli.Tests`** project — xUnit regression tests for
+  `CliConfiguration` precedence (env > JSON) and default fall-through.
+- **`RunSilentReadStdoutAsync`** helper in `BootstrapCommand` — portable
+  container-existence check using `ps -aq --filter name=…` which works
+  on both podman and docker.
+
+### Changed
+
+- **`CliConfiguration.Load()` provider order reversed** —
+  `AddJsonFile` is now registered before `AddEnvironmentVariables`, so
+  `ARISTA_MCP__*` environment variables correctly override a developer's
+  local `arista-mcp.json`. This matches `Microsoft.Extensions.Configuration`'s
+  "last registered wins" semantics and aligns with the ASP.NET Core
+  default (`appsettings.json` → env vars). Regression-guarded by
+  `CliConfigurationTests.EnvironmentVariable_overrides_JsonFile_value`.
+- **`BootstrapCommand.RunSilentAsync` / `RunStreamingAsync`** now kill the
+  child process tree on `OperationCanceledException`. Without this an
+  interrupted `pg_restore` / `podman pull` would keep running in the
+  background past the abandoned bootstrap.
+- **`BootstrapCommand.RestoreCorpusAsync`** wraps the download + restore
+  in a `try/finally` so the host-side and container-side temp dump
+  files are always removed, even when the download or `pg_restore`
+  fails partway. The serial HNSW rebuild fallback now captures and
+  returns the `psql` exit code instead of silently swallowing it
+  (`hnswRc != 0` is fatal — dense search would otherwise return no
+  results).
+- **`Quadlet arista-mcp.container`** gains a `HealthCmd=curl /v1/healthz`
+  block now that the endpoint exists (see Added).
+- **.NET SDK** bumped to `10.0.301` (was `10.0.201`). `global.json`
+  still uses `rollForward: latestFeature` so any 10.0.3xx SDK satisfies
+  the pin on hosted runners.
+- **Package set lifted to the current minor/patch** (verified against
+  NuGet on 2026-06-29):
+  - `ModelContextProtocol` + `.AspNetCore` 1.2.0 → 1.4.0
+  - `Microsoft.Extensions.AI` 10.5.0 → 10.7.0
+  - `Microsoft.Extensions.{Hosting,Configuration*,Options}` 10.0.6 → 10.0.9
+  - `Microsoft.EntityFrameworkCore{,.Design,.Relational}` 9.0.15 → 9.0.17
+    (still held at 9.x because `Pgvector.EntityFrameworkCore 0.3.0` —
+    latest — pins Npgsql.EFCore 9.0.x)
+  - `Microsoft.ML.OnnxRuntime{,.Gpu}` 1.24.4 → 1.27.0
+  - `System.CommandLine` 2.0.6 → 2.0.9
+  - `Spectre.Console` 0.55.2 → 0.57.1
+  - `Testcontainers.PostgreSql` 4.11.0 → 4.12.0
+  - `Microsoft.NET.Test.Sdk` 18.4.0 → 18.7.0
+  - `FluentAssertions` 8.9.0 → 8.10.0
+  - `Microsoft.Extensions.TimeProvider.Testing` 10.5.0 → 10.7.0
+  - `System.Security.Cryptography.Xml` 10.0.6 → 10.0.9
+  - `OpenTelemetry{,.Extensions.Hosting,.Exporter.OpenTelemetryProtocol}` 1.15.3 → 1.16.0
+- **Analyzers** bumped: `Meziantou.Analyzer` 3.0.50 → 3.0.117,
+  `SonarAnalyzer.CSharp` 10.23.0 → 10.27.0. `Roslynator.Analyzers`
+  4.15.0 and `AsyncFixer` 2.1.0 stay (latest).
+- **NuGetAudit** enabled in `Directory.Build.props` (`Mode=all`,
+  `Level=moderate`) so a known CVE in any transitive dep fails the
+  build instead of leaking past CI silently.
+
+### Fixed
+
+- **`e2e.yml` branch trigger** corrected from `[main]` to `[master]`
+  (porting artefact from the sibling nutanix-mcp repo). The E2E suite
+  now actually runs on PRs and pushes to `master`; `workflow_call` is
+  also added so `release.yml` can mirror it as a gate.
+- **`BootstrapCommand` portability**: replaced the
+  `{runtime} container exists {name}` call (a podman-only subcommand
+  that always exits non-zero under Docker) with the cross-runtime
+  `ps -aq --filter name=^{name}$` check. A second `bootstrap` run on a
+  Docker host no longer fails with "container name already in use".
+- **`BootstrapCommand` config-load side effect**: removed the
+  `_ = CliConfiguration.Load();` hack in `RunStreamingAsync`. The
+  workaround re-read environment vars and JSON file on every subprocess
+  invocation (10-20× per bootstrap) and could mask the actual subprocess
+  error with an unrelated JSON parse exception if the user's
+  `arista-mcp.json` was malformed. Root cause was the now-removed
+  dead `IngestParallelism` settings field.
+- **`OnnxEmbedder.cs` doc-comment** corrected — the model exposes a
+  pre-pooled `sentence_embedding [B, 768]`, not `last_hidden_state`
+  + manual mean-pool (the comment described draft code that was never
+  written). Future contributors will not be tempted to add unnecessary
+  pooling.
+
+### Removed
+
+- **`AristaMcpSettings.IngestParallelism`** dead field — declared with
+  a default of 4, never consumed in production code. Setting
+  `ARISTA_MCP__IngestParallelism` had no effect.
+
+### Notes
+
+- CPU-only ONNX Runtime stays the default. `Microsoft.ML.OnnxRuntime.Gpu`
+  is pinned at the same revision so the optional `-p:UseGpuOnnx=true`
+  switch in `src/AristaMcp.Embedding/AristaMcp.Embedding.csproj`
+  restores a matched pair; the GPU code path is opt-in only.
+- Full solution (5 src + 5 tests projects) builds against SDK 10.0.301
+  with **0 warnings / 0 errors** under the full analyzer suite.
+- Self-contained single-file publish for `linux-x64` smoke-tested at
+  ~132 MB; `--help` runs cleanly.
 
 ## [0.3.0] — 2026-04-26
 

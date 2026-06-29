@@ -2,10 +2,12 @@ name: E2E
 
 on:
   pull_request:
-    branches: [main]
+    branches: [master]
   push:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
+  # Allow release.yml to call this workflow as a release-gate mirror.
+  workflow_call:
 
 concurrency:
   group: e2e-${{ github.ref }}
@@ -17,27 +19,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    services:
-      postgres:
-        image: tensorchord/vchord-suite:pg18-latest
-        env:
-          POSTGRES_DB: arista
-          POSTGRES_USER: arista
-          POSTGRES_PASSWORD: arista
-          POSTGRES_INITDB_ARGS: --data-checksums --encoding=UTF-8
-        ports:
-          - 5434:5432
-        options: >-
-          --name arista-mcp-postgres
-          --health-cmd "pg_isready -U arista -d arista"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 15
-          -c shared_preload_libraries=vector,vchord,vchord_bm25,pg_tokenizer
+    # NOTE: we deliberately do NOT use `services:` here because the
+    # `options:` field of a service container is passed verbatim to
+    # `docker create` — Postgres command-line args like
+    # `-c shared_preload_libraries=…` are then misinterpreted as the
+    # docker flag `-c, --cpu-shares` and the container fails to start.
+    # Instead we launch PG manually below so we get full control over
+    # the postgres CMD.
 
     env:
       ARISTA_MCP__ConnectionString: "Host=localhost;Port=5434;Database=arista;Username=arista;Password=arista"
-      ARISTA_MCP_TEST_CS: "Host=localhost;Port=5434;Database=arista;Username=arista;Password=arista"
+      # PgvectorFixture refuses to run unless DB name ends with `_test` (safety
+      # guard against TRUNCATE-ing a developer's prod ingest). The fixture
+      # creates the DB on first connect.
+      ARISTA_MCP_TEST_CS: "Host=localhost;Port=5434;Database=arista_test;Username=arista;Password=arista"
       PGHOST: localhost
       PGPORT: "5434"
       PGUSER: arista
@@ -46,6 +41,38 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Start Postgres (vchord-suite pg18) with shared_preload_libraries
+        run: |
+          set -euo pipefail
+          docker run -d \
+            --name arista-mcp-postgres \
+            -p 5434:5432 \
+            -e POSTGRES_DB=arista \
+            -e POSTGRES_USER=arista \
+            -e POSTGRES_PASSWORD=arista \
+            -e POSTGRES_INITDB_ARGS="--data-checksums --encoding=UTF-8" \
+            --health-cmd "pg_isready -U arista -d arista" \
+            --health-interval 10s \
+            --health-timeout 5s \
+            --health-retries 15 \
+            tensorchord/vchord-suite:pg18-latest \
+            postgres \
+              -c shared_preload_libraries=vector,vchord,vchord_bm25,pg_tokenizer \
+              -c shared_buffers=512MB \
+              -c maintenance_work_mem=1GB \
+              -c max_wal_size=2GB
+          # Wait for pg_isready
+          for i in {1..30}; do
+            if docker exec arista-mcp-postgres pg_isready -U arista -d arista >/dev/null 2>&1; then
+              echo "postgres ready after $i polls"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "postgres did not become ready in 60s" >&2
+          docker logs arista-mcp-postgres
+          exit 1
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
@@ -78,7 +105,7 @@ jobs:
         shell: bash
 
       - name: Install dotnet-ef
-        run: dotnet tool install --global dotnet-ef --version 9.0.15
+        run: dotnet tool install --global dotnet-ef --version 9.0.17
 
       - name: Apply EF migrations
         run: |
@@ -87,7 +114,10 @@ jobs:
             --startup-project src/AristaMcp.Data
 
       - name: Build solution
-        run: dotnet build arista-mcp.slnx --no-restore
+        # No prior `dotnet restore` step is wired up — let build auto-restore.
+        # `dotnet ef database update` above only restores src/AristaMcp.Data,
+        # not the full solution graph.
+        run: dotnet build arista-mcp.slnx
 
       - name: Run unit + integration tests
         run: dotnet test arista-mcp.slnx --no-build --filter "FullyQualifiedName!~E2E"
@@ -110,3 +140,7 @@ jobs:
             **/TestResults/**
             tests/**/*.log
           retention-days: 7
+
+      - name: Stop Postgres
+        if: always()
+        run: docker rm -f arista-mcp-postgres || true
