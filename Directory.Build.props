@@ -15,6 +15,12 @@
     <NoWarn>$(NoWarn);MA0004;MA0051;MA0009;S6966</NoWarn>
     <ErrorLog>$(MSBuildProjectDirectory)/bin/$(Configuration)/analyzers.sarif</ErrorLog>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- Inline NuGet vulnerability audit on every restore. Fails at moderate so
+         a known CVE in a transitive dependency blocks the build rather than
+         leaking past CI silently. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>moderate</NuGetAuditLevel>
   </PropertyGroup>
 
   <!-- Release identity — bumped per release in Directory.Build.props, not per project.
@@ -46,9 +52,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <GlobalPackageReference Include="Meziantou.Analyzer" Version="3.0.50" />
+    <GlobalPackageReference Include="Meziantou.Analyzer" Version="3.0.117" />
     <GlobalPackageReference Include="Roslynator.Analyzers" Version="4.15.0" />
-    <GlobalPackageReference Include="SonarAnalyzer.CSharp" Version="10.23.0.137933" />
+    <GlobalPackageReference Include="SonarAnalyzer.CSharp" Version="10.27.0.140913" />
     <GlobalPackageReference Include="AsyncFixer" Version="2.1.0" />
     <GlobalPackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="4.14.0" />
   </ItemGroup>
