@@ -12,5 +12,6 @@
     <Project Path="tests/AristaMcp.Data.Tests/AristaMcp.Data.Tests.csproj" />
     <Project Path="tests/AristaMcp.Server.Tests/AristaMcp.Server.Tests.csproj" />
     <Project Path="tests/AristaMcp.E2E/AristaMcp.E2E.csproj" />
+    <Project Path="tests/AristaMcp.Cli.Tests/AristaMcp.Cli.Tests.csproj" />
   </Folder>
 </Solution>

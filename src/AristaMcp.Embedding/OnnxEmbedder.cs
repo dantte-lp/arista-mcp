@@ -4,8 +4,13 @@ using Microsoft.ML.OnnxRuntime;
 namespace AristaMcp.Embedding;
 
 // Runs snowflake-arctic-embed-m-v1.5 (BERT-base arch) via ONNX Runtime.
-// Inputs: input_ids, attention_mask, token_type_ids (all int64 [B, L]).
-// Output: last_hidden_state [B, L, 768] — mean-pool with attention mask then L2-normalize.
+// Inputs:  input_ids, attention_mask (int64 [B, L]). The Snowflake ONNX export
+//          does NOT declare a token_type_ids input — feeding one fails session
+//          binding (per CLAUDE.md, Sprint 2).
+// Output:  sentence_embedding [B, 768] — pre-pooled by the export (mean-pool
+//          baked into the graph). We defensively re-L2-normalise on the .NET
+//          side to protect retrieval quality if a future export drops the
+//          normalize op silently.
 public sealed class OnnxEmbedder : IEmbedder
 {
     private const int HiddenSize = 768;

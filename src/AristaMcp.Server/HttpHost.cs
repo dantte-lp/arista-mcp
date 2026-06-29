@@ -16,6 +16,12 @@ public static class HttpHost
 
         builder.Services.AddAristaMcpServices(settings);
 
+        // Liveness probe for orchestrators (Podman HealthCmd, Kubernetes,
+        // Windows Service watchdog). The check is process-liveness only —
+        // backend dependency status (DB reachable, models loaded) is reported
+        // separately by the `get_status` MCP tool. Mirrors nutanix-mcp.
+        builder.Services.AddHealthChecks();
+
         builder.Services
             .AddMcpServer()
             .WithHttpTransport(o => o.Stateless = true)
@@ -23,6 +29,7 @@ public static class HttpHost
 
         var app = builder.Build();
         app.MapMcp();
+        app.MapHealthChecks("/v1/healthz");
 
         return app.RunAsync(ct);
     }

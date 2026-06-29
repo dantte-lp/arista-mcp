@@ -25,7 +25,6 @@ public sealed class AristaMcpSettings
     public McpTransport Transport { get; set; } = McpTransport.Stdio;
     public int HttpPort { get; set; } = 8080;
     public int IngestBatchSize { get; set; } = 32;
-    public int IngestParallelism { get; set; } = 4;
     public int ChunkMaxTokens { get; set; } = 1200;
     public int ChunkTargetTokens { get; set; } = 512;
     public int ChunkOverlapTokens { get; set; } = 64;

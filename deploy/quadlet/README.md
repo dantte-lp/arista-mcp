@@ -98,6 +98,8 @@ Quadlet files (overwriting if present), and re-applies `pg_restore
 - **`HealthCmd=`** is honoured by Podman 4.5+; older Podman ignores it
   (PG still starts, but systemd won't gate on the container being
   ready). Quadlet itself needs Podman ≥ 4.4.
-- **No HealthCmd= on `arista-mcp.container`** — the server has no
-  `/healthz` endpoint yet. systemd `Restart=on-failure` covers process
-  crashes; add a HealthCmd once a probe lands.
+- **`HealthCmd=` on `arista-mcp.container`** uses `curl /v1/healthz` —
+  the endpoint is wired in `src/AristaMcp.Server/HttpHost.cs` via
+  `MapHealthChecks`. It returns a 200 OK process-liveness response;
+  for backend status (DB reachable, models loaded) the MCP `get_status`
+  tool is authoritative.

@@ -8,8 +8,49 @@ Dates use ISO-8601.
 
 ## [Unreleased]
 
+### Added
+
+- **`/v1/healthz`** liveness endpoint on the Streamable-HTTP transport
+  (`src/AristaMcp.Server/HttpHost.cs`, via
+  `Microsoft.AspNetCore.Diagnostics.HealthChecks`). Plain 200 OK
+  process-liveness check consumed by `deploy/quadlet/arista-mcp.container`'s
+  new `HealthCmd=curl --fail --silent http://127.0.0.1:8080/v1/healthz`.
+  Backend-status reporting stays the responsibility of the `get_status`
+  MCP tool.
+- **`Exec=postgres -c shared_preload_libraries=…`** in
+  `deploy/quadlet/arista-mcp-postgres.container` plus the full memory
+  tuning block from `docker/compose.yaml`. Without this the Quadlet PG
+  pod fails `CREATE EXTENSION vchord` on first start (the
+  `tensorchord/vchord-suite` image bundles the libraries but does NOT
+  preset them).
+- **`AristaMcp.Cli.Tests`** project — xUnit regression tests for
+  `CliConfiguration` precedence (env > JSON) and default fall-through.
+- **`RunSilentReadStdoutAsync`** helper in `BootstrapCommand` — portable
+  container-existence check using `ps -aq --filter name=…` which works
+  on both podman and docker.
+
 ### Changed
 
+- **`CliConfiguration.Load()` provider order reversed** —
+  `AddJsonFile` is now registered before `AddEnvironmentVariables`, so
+  `ARISTA_MCP__*` environment variables correctly override a developer's
+  local `arista-mcp.json`. This matches `Microsoft.Extensions.Configuration`'s
+  "last registered wins" semantics and aligns with the ASP.NET Core
+  default (`appsettings.json` → env vars). Regression-guarded by
+  `CliConfigurationTests.EnvironmentVariable_overrides_JsonFile_value`.
+- **`BootstrapCommand.RunSilentAsync` / `RunStreamingAsync`** now kill the
+  child process tree on `OperationCanceledException`. Without this an
+  interrupted `pg_restore` / `podman pull` would keep running in the
+  background past the abandoned bootstrap.
+- **`BootstrapCommand.RestoreCorpusAsync`** wraps the download + restore
+  in a `try/finally` so the host-side and container-side temp dump
+  files are always removed, even when the download or `pg_restore`
+  fails partway. The serial HNSW rebuild fallback now captures and
+  returns the `psql` exit code instead of silently swallowing it
+  (`hnswRc != 0` is fatal — dense search would otherwise return no
+  results).
+- **`Quadlet arista-mcp.container`** gains a `HealthCmd=curl /v1/healthz`
+  block now that the endpoint exists (see Added).
 - **.NET SDK** bumped to `10.0.301` (was `10.0.201`). `global.json`
   still uses `rollForward: latestFeature` so any 10.0.3xx SDK satisfies
   the pin on hosted runners.
@@ -36,6 +77,36 @@ Dates use ISO-8601.
 - **NuGetAudit** enabled in `Directory.Build.props` (`Mode=all`,
   `Level=moderate`) so a known CVE in any transitive dep fails the
   build instead of leaking past CI silently.
+
+### Fixed
+
+- **`e2e.yml` branch trigger** corrected from `[main]` to `[master]`
+  (porting artefact from the sibling nutanix-mcp repo). The E2E suite
+  now actually runs on PRs and pushes to `master`; `workflow_call` is
+  also added so `release.yml` can mirror it as a gate.
+- **`BootstrapCommand` portability**: replaced the
+  `{runtime} container exists {name}` call (a podman-only subcommand
+  that always exits non-zero under Docker) with the cross-runtime
+  `ps -aq --filter name=^{name}$` check. A second `bootstrap` run on a
+  Docker host no longer fails with "container name already in use".
+- **`BootstrapCommand` config-load side effect**: removed the
+  `_ = CliConfiguration.Load();` hack in `RunStreamingAsync`. The
+  workaround re-read environment vars and JSON file on every subprocess
+  invocation (10-20× per bootstrap) and could mask the actual subprocess
+  error with an unrelated JSON parse exception if the user's
+  `arista-mcp.json` was malformed. Root cause was the now-removed
+  dead `IngestParallelism` settings field.
+- **`OnnxEmbedder.cs` doc-comment** corrected — the model exposes a
+  pre-pooled `sentence_embedding [B, 768]`, not `last_hidden_state`
+  + manual mean-pool (the comment described draft code that was never
+  written). Future contributors will not be tempted to add unnecessary
+  pooling.
+
+### Removed
+
+- **`AristaMcpSettings.IngestParallelism`** dead field — declared with
+  a default of 4, never consumed in production code. Setting
+  `ARISTA_MCP__IngestParallelism` had no effect.
 
 ### Notes
 

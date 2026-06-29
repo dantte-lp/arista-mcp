@@ -2,10 +2,12 @@ name: E2E
 
 on:
   pull_request:
-    branches: [main]
+    branches: [master]
   push:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
+  # Allow release.yml to call this workflow as a release-gate mirror.
+  workflow_call:
 
 concurrency:
   group: e2e-${{ github.ref }}
