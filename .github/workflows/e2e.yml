@@ -29,7 +29,10 @@ jobs:
 
     env:
       ARISTA_MCP__ConnectionString: "Host=localhost;Port=5434;Database=arista;Username=arista;Password=arista"
-      ARISTA_MCP_TEST_CS: "Host=localhost;Port=5434;Database=arista;Username=arista;Password=arista"
+      # PgvectorFixture refuses to run unless DB name ends with `_test` (safety
+      # guard against TRUNCATE-ing a developer's prod ingest). The fixture
+      # creates the DB on first connect.
+      ARISTA_MCP_TEST_CS: "Host=localhost;Port=5434;Database=arista_test;Username=arista;Password=arista"
       PGHOST: localhost
       PGPORT: "5434"
       PGUSER: arista
