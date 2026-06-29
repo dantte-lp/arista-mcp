@@ -19,23 +19,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    services:
-      postgres:
-        image: tensorchord/vchord-suite:pg18-latest
-        env:
-          POSTGRES_DB: arista
-          POSTGRES_USER: arista
-          POSTGRES_PASSWORD: arista
-          POSTGRES_INITDB_ARGS: --data-checksums --encoding=UTF-8
-        ports:
-          - 5434:5432
-        options: >-
-          --name arista-mcp-postgres
-          --health-cmd "pg_isready -U arista -d arista"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 15
-          -c shared_preload_libraries=vector,vchord,vchord_bm25,pg_tokenizer
+    # NOTE: we deliberately do NOT use `services:` here because the
+    # `options:` field of a service container is passed verbatim to
+    # `docker create` — Postgres command-line args like
+    # `-c shared_preload_libraries=…` are then misinterpreted as the
+    # docker flag `-c, --cpu-shares` and the container fails to start.
+    # Instead we launch PG manually below so we get full control over
+    # the postgres CMD.
 
     env:
       ARISTA_MCP__ConnectionString: "Host=localhost;Port=5434;Database=arista;Username=arista;Password=arista"
@@ -48,6 +38,38 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Start Postgres (vchord-suite pg18) with shared_preload_libraries
+        run: |
+          set -euo pipefail
+          docker run -d \
+            --name arista-mcp-postgres \
+            -p 5434:5432 \
+            -e POSTGRES_DB=arista \
+            -e POSTGRES_USER=arista \
+            -e POSTGRES_PASSWORD=arista \
+            -e POSTGRES_INITDB_ARGS="--data-checksums --encoding=UTF-8" \
+            --health-cmd "pg_isready -U arista -d arista" \
+            --health-interval 10s \
+            --health-timeout 5s \
+            --health-retries 15 \
+            tensorchord/vchord-suite:pg18-latest \
+            postgres \
+              -c shared_preload_libraries=vector,vchord,vchord_bm25,pg_tokenizer \
+              -c shared_buffers=512MB \
+              -c maintenance_work_mem=1GB \
+              -c max_wal_size=2GB
+          # Wait for pg_isready
+          for i in {1..30}; do
+            if docker exec arista-mcp-postgres pg_isready -U arista -d arista >/dev/null 2>&1; then
+              echo "postgres ready after $i polls"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "postgres did not become ready in 60s" >&2
+          docker logs arista-mcp-postgres
+          exit 1
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
@@ -80,7 +102,7 @@ jobs:
         shell: bash
 
       - name: Install dotnet-ef
-        run: dotnet tool install --global dotnet-ef --version 9.0.15
+        run: dotnet tool install --global dotnet-ef --version 9.0.17
 
       - name: Apply EF migrations
         run: |
@@ -112,3 +134,7 @@ jobs:
             **/TestResults/**
             tests/**/*.log
           retention-days: 7
+
+      - name: Stop Postgres
+        if: always()
+        run: docker rm -f arista-mcp-postgres || true
