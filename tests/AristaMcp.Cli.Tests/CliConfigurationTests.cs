@@ -16,6 +16,7 @@ public sealed class CliConfigurationTests : IDisposable
     private readonly string _previousCwd = Environment.CurrentDirectory;
     private readonly string _scratchDir;
     private const string EnvKeyModelsDir = "ARISTA_MCP__ModelsDir";
+    private const string EnvKeyRerankerDir = "ARISTA_MCP__RerankerDir";
     private const string EnvKeyConnString = "ARISTA_MCP__ConnectionString";
 
     public CliConfigurationTests()
@@ -29,6 +30,7 @@ public sealed class CliConfigurationTests : IDisposable
     {
         Environment.CurrentDirectory = _previousCwd;
         Environment.SetEnvironmentVariable(EnvKeyModelsDir, null);
+        Environment.SetEnvironmentVariable(EnvKeyRerankerDir, null);
         Environment.SetEnvironmentVariable(EnvKeyConnString, null);
         try { Directory.Delete(_scratchDir, recursive: true); }
         catch (IOException) { /* best-effort */ }
@@ -51,6 +53,23 @@ public sealed class CliConfigurationTests : IDisposable
             "ARISTA_MCP__* env vars must win over arista-mcp.json (12-factor); " +
             "see code-review finding S1 / N-F3.");
         settings.ConnectionString.Should().Be("Host=env");
+    }
+
+    [Fact]
+    public void RerankerDir_env_var_is_bound_to_settings()
+    {
+        Environment.SetEnvironmentVariable(EnvKeyRerankerDir,
+            "/var/lib/arista-mcp/models/reranker-v2m3-int8");
+
+        var settings = CliConfiguration.Load();
+
+        // ARISTA_MCP__RerankerDir is the documented production override for
+        // the v0.3.0 bge-reranker-v2-m3 INT8 fine-tune (or any A/B reranker).
+        // Regression guard for the gap surfaced by the v0.3.x review pass:
+        // deploy/systemd/arista-mcp.env.example mentions the variable but
+        // it must actually round-trip into AristaMcpSettings.
+        settings.RerankerDir.Should().Be(
+            "/var/lib/arista-mcp/models/reranker-v2m3-int8");
     }
 
     [Fact]

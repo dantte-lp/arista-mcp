@@ -10,6 +10,12 @@ Dates use ISO-8601.
 
 ### Added
 
+- **`AristaMcpSettings.RerankerDir`** override — `deploy/systemd/arista-mcp.env.example`
+  has documented `ARISTA_MCP__RERANKERDIR` since v0.3.x, but the property was
+  missing from settings (silent ignore). Now wired through `ModelPaths.RerankerDir`
+  + `ServerHosting.BuildReranker` + the three CLI commands (`bench`,
+  `curate-triples`, `validate-bench-queries`). Regression-guarded by
+  `CliConfigurationTests.RerankerDir_env_var_is_bound_to_settings`.
 - **`/v1/healthz`** liveness endpoint on the Streamable-HTTP transport
   (`src/AristaMcp.Server/HttpHost.cs`, via
   `Microsoft.AspNetCore.Diagnostics.HealthChecks`). Plain 200 OK
