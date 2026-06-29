@@ -21,16 +21,24 @@ public static class ServeCommand
             DefaultValueFactory = _ => 8080,
         };
 
+        var bind = new Option<string>("--bind")
+        {
+            Description = "HTTP bind address. Default 127.0.0.1; pass 0.0.0.0 inside containers.",
+            DefaultValueFactory = _ => "127.0.0.1",
+        };
+
         var cmd = new Command("serve", "Run the arista-mcp MCP server")
         {
             transport,
             port,
+            bind,
         };
 
         cmd.SetAction(async (ParseResult pr, CancellationToken ct) =>
         {
             var t = pr.GetValue(transport) ?? "stdio";
             var p = pr.GetValue(port);
+            var b = pr.GetValue(bind) ?? "127.0.0.1";
             var settings = CliConfiguration.Load();
 
             try
@@ -41,7 +49,7 @@ public static class ServeCommand
                 }
                 else if (string.Equals(t, "http", StringComparison.OrdinalIgnoreCase))
                 {
-                    await HttpHost.RunAsync(settings, p, ct).ConfigureAwait(false);
+                    await HttpHost.RunAsync(settings, b, p, ct).ConfigureAwait(false);
                 }
                 else
                 {

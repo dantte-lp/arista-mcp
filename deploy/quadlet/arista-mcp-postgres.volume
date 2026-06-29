@@ -1,0 +1,7 @@
+[Unit]
+Description=PostgreSQL data volume for arista-mcp
+
+[Volume]
+VolumeName=arista-mcp-postgres
+# Named Podman volume; persists across container restarts and image
+# pulls. Survives an `--auto-update` redeploy of the container.

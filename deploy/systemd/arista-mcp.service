@@ -1,0 +1,66 @@
+[Unit]
+# arista-mcp — hybrid-retrieval MCP server for Arista documentation.
+# Lightweight systemd unit: HTTP transport on a dedicated localhost port,
+# behind a reverse proxy if you need TLS / external exposure.
+#
+# Install:
+#   sudo cp deploy/systemd/arista-mcp.service /etc/systemd/system/
+#   sudo cp deploy/systemd/arista-mcp.env.example /etc/arista-mcp.env
+#   sudo $EDITOR /etc/arista-mcp.env       # set DB conn-string + models dir
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin arista-mcp
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now arista-mcp
+#
+# Logs:
+#   journalctl -u arista-mcp -f
+Description=arista-mcp hybrid-retrieval MCP server
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arista-mcp
+Group=arista-mcp
+
+# EnvironmentFile holds ARISTA_MCP__CONNECTIONSTRING, ARISTA_MCP__MODELSDIR,
+# ARISTA_MCP__RERANKERDIR, etc. — see arista-mcp.env.example.
+EnvironmentFile=/etc/arista-mcp.env
+
+# Single-file self-contained binary from the GitHub release tarball.
+# Adjust the path if you install elsewhere.
+ExecStart=/usr/local/bin/arista-mcp serve --transport http --port 8080
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+
+# Hardening — minimal attack surface, read-only system, no NEW priv.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+# ^ ONNX Runtime JITs kernels at session-init; MemoryDenyWriteExecute=true
+#   would crash the embedder load. Keep it off.
+
+# Network: allow local + outbound for HTTP transport. If the server is local
+# only, add IPAddressDeny=any plus IPAddressAllow=localhost link-local.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Models + state are inside the user's home or shared dir (default
+# /var/lib/arista-mcp). The unit refuses to write outside.
+StateDirectory=arista-mcp
+WorkingDirectory=/var/lib/arista-mcp
+
+# Resource limits — tune to match your bench workload.
+LimitNOFILE=8192
+LimitNPROC=512
+
+[Install]
+WantedBy=multi-user.target
