@@ -111,7 +111,10 @@ jobs:
             --startup-project src/AristaMcp.Data
 
       - name: Build solution
-        run: dotnet build arista-mcp.slnx --no-restore
+        # No prior `dotnet restore` step is wired up — let build auto-restore.
+        # `dotnet ef database update` above only restores src/AristaMcp.Data,
+        # not the full solution graph.
+        run: dotnet build arista-mcp.slnx
 
       - name: Run unit + integration tests
         run: dotnet test arista-mcp.slnx --no-build --filter "FullyQualifiedName!~E2E"
