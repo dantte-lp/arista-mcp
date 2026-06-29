@@ -79,27 +79,82 @@ flowchart LR
 
 Deep dive in **[docs/en/retrieval.md](docs/en/retrieval.md)**.
 
-## Quick start
+## Quick start — pre-built binary + corpus dump
+
+Linux / macOS / Windows. No `dotnet` SDK, no `git clone`, no re-ingest.
+Each release ships a self-contained single-file binary for all 6 RIDs
+plus a `pg_restore`-able corpus dump.
+
+### Linux / macOS
 
 ```bash
-# 1. PostgreSQL 18 with pgvector + vchord + vchord_bm25 + pg_tokenizer
+# 1. Pick the right RID — linux-x64, linux-arm64, osx-x64, osx-arm64.
+RID=linux-x64
+TAG=v0.3.0
+gh release download "$TAG" -R dantte-lp/arista-mcp \
+  -p "arista-mcp-${TAG}-${RID}.tar.gz" -p "arista-mcp-${TAG}-${RID}.tar.gz.sha256"
+sha256sum -c "arista-mcp-${TAG}-${RID}.tar.gz.sha256"
+tar -xzf "arista-mcp-${TAG}-${RID}.tar.gz"
+cd "arista-mcp-${TAG}-${RID}"
+
+# 2. ONNX models (~530 MB embedder + reranker).
+pwsh scripts/fetch-models.ps1            # needs PowerShell 7+ on linux/macOS
+
+# 3. One-shot bootstrap: pulls postgres (vchord-suite pg18), restores
+#    the corpus dump from the release attachment, runs pg_restore.
+#    Idempotent — re-running starts the existing container; restore
+#    is skipped when --release is omitted on a follow-up run.
+./arista-mcp bootstrap --release "$TAG" --quadlet    # Linux: --quadlet adds systemd auto-restart
+./arista-mcp bootstrap --release "$TAG"              # macOS: no Quadlet
+
+# 4. Serve — stdio for Claude Desktop / Claude Code.
+./arista-mcp serve --transport stdio
+```
+
+### Windows
+
+```powershell
+$TAG = 'v0.3.0'
+$RID = 'win-x64'                 # or win-arm64
+gh release download $TAG -R dantte-lp/arista-mcp `
+  -p "arista-mcp-$TAG-$RID.zip" -p "arista-mcp-$TAG-$RID.zip.sha256"
+Get-FileHash "arista-mcp-$TAG-$RID.zip" -Algorithm SHA256
+Expand-Archive "arista-mcp-$TAG-$RID.zip" .
+Set-Location "arista-mcp-$TAG-$RID"
+
+pwsh scripts\fetch-models.ps1
+
+# Bootstrap — assumes Podman Desktop or Docker Desktop is running.
+.\arista-mcp.exe bootstrap --release $TAG
+
+# Optional: register as a Windows Service (auto-start on boot).
+pwsh deploy\windows\Install-AristaMcpService.ps1 `
+  -BinaryPath "$PWD\arista-mcp.exe" `
+  -ConnectionString 'Host=127.0.0.1;Port=5434;Database=arista;Username=arista;Password=arista' `
+  -ModelsDir "$PWD\models"
+```
+
+### Container (any OS)
+
+```bash
+podman pull ghcr.io/dantte-lp/arista-mcp:v0.3.0
+# Cosign verify (keyless OIDC signature is added by the release pipeline):
+cosign verify ghcr.io/dantte-lp/arista-mcp:v0.3.0 \
+  --certificate-identity-regexp '.+' \
+  --certificate-oidc-issuer-regexp '.+'
+```
+
+Use `deploy/quadlet/` for a full Quadlet-managed stack (PG + server)
+or run the image directly against an externally-managed Postgres.
+
+### Source build (contributors only)
+
+```bash
 podman compose -f docker/compose.yaml up -d postgres
-
-# 2. ONNX models (~530 MB) + optional HyDE LLM (~1 GB Qwen2.5 GGUF)
 pwsh scripts/fetch-models.ps1
-
-# 3. Schema: documents, chunks, ingest_runs, bm25v trigger, HNSW + BM25 indexes
-dotnet ef database update --project src/AristaMcp.Data --startup-project src/AristaMcp.Data
-
-# 4. Ingest the arista-docs catalog (or a slice)
-dotnet run --project src/AristaMcp.Cli -- ingest
-dotnet run --project src/AristaMcp.Cli -- ingest --category avd  # ~2 min test slice
-
-# 5. Serve — stdio for Claude Desktop / Claude Code
+dotnet ef database update --project src/AristaMcp.Data
+dotnet run --project src/AristaMcp.Cli -- ingest                    # ~25 min full corpus
 dotnet run --project src/AristaMcp.Cli -- serve --transport stdio
-
-#    ...or HTTP for local experiments
-dotnet run --project src/AristaMcp.Cli -- serve --transport http --port 8080
 ```
 
 Walk-through, troubleshooting, client configs →
@@ -122,7 +177,8 @@ Full schemas, example payloads, query patterns → **[docs/en/mcp-tools.md](docs
 | Verb                      | Purpose                                                                 |
 |---------------------------|-------------------------------------------------------------------------|
 | `arista-mcp ingest`       | Chunk + embed + upsert an `arista-docs` catalog into PostgreSQL         |
-| `arista-mcp serve`        | Run the MCP server (`--transport stdio\|http`, `--port N`)              |
+| `arista-mcp serve`        | Run the MCP server (`--transport stdio\|http`, `--bind`, `--port N`)    |
+| `arista-mcp bootstrap`    | One-shot: provision postgres + `pg_restore` the corpus dump from a release attachment (+ optional Quadlet on Linux) |
 | `arista-mcp bench`        | Retrieval bench with per-run JSONL history (`--history`, `--label`)     |
 | `arista-mcp curate-triples`       | Emit `(query, positive, hard-negatives)` for cross-encoder tuning |
 | `arista-mcp validate-bench-queries` | Fairness-filter LLM-generated bench queries via the retriever   |

@@ -6,12 +6,13 @@ namespace AristaMcp.Server;
 
 public static class HttpHost
 {
-    public static Task RunAsync(AristaMcpSettings settings, int port, CancellationToken ct)
+    public static Task RunAsync(AristaMcpSettings settings, string bindAddress, int port, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        ArgumentException.ThrowIfNullOrWhiteSpace(bindAddress);
 
         var builder = WebApplication.CreateBuilder();
-        builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
+        builder.WebHost.UseUrls($"http://{bindAddress}:{port}");
 
         builder.Services.AddAristaMcpServices(settings);
 

@@ -1,0 +1,397 @@
+name: release
+
+# 4-stage release gate:
+#
+#   1. ci-mirror   — reuses ci.yml in workflow_call mode (build + unit
+#                    tests). Fails fast.
+#   2. publish     — matrix x6 RIDs. dotnet publish single-file +
+#                    self-contained. SHA-256 checksum per archive.
+#   3. container   — buildx multi-arch (linux/amd64,arm64). Push to
+#                    ghcr.io/dantte-lp/arista-mcp:<tag> + :latest.
+#                    Keyless cosign signature on the image digest.
+#   4. corpus-dump — bring-forward: if the new release has no
+#                    arista-corpus-*.dump asset yet, copy it from the
+#                    last release that does. Idempotent — skips when an
+#                    asset is already present (e.g. uploaded fresh via
+#                    scripts/dump-corpus.sh).
+#   5. finalize    — extracts the [<tag>] block from CHANGELOG.md as
+#                    release notes; updates the GitHub Release.
+#
+# Tag format gate: only `v\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?` triggers a
+# real release. Anything else fails the validate-tag step before any
+# artefact is built.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.3.1)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # GATE 1 — full CI must pass before we build any release artefact.
+  # ──────────────────────────────────────────────────────────────────
+  ci-mirror:
+    name: ci gate
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
+  # ──────────────────────────────────────────────────────────────────
+  # Validate the tag format before we burn build minutes.
+  # ──────────────────────────────────────────────────────────────────
+  validate-tag:
+    name: validate tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.name }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Resolve and validate tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="${INPUT_TAG:-$REF_NAME}"
+          if ! printf '%s' "$candidate" \
+              | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$'; then
+              printf 'invalid release tag: %q\n' "$candidate" >&2
+              exit 1
+          fi
+          version="${candidate#v}"
+          printf 'name=%s\n' "$candidate" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+  # ──────────────────────────────────────────────────────────────────
+  # GATE 2 — single-file binaries for 6 RIDs. Per-archive SHA-256.
+  # Uploads to the GitHub Release.
+  # ──────────────────────────────────────────────────────────────────
+  publish:
+    name: publish ${{ matrix.rid }}
+    needs: [ci-mirror, validate-tag]
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  rid: linux-x64,   archive: tar.gz }
+          - { os: ubuntu-latest,  rid: linux-arm64, archive: tar.gz }
+          - { os: windows-latest, rid: win-x64,     archive: zip }
+          - { os: windows-latest, rid: win-arm64,   archive: zip }
+          - { os: macos-latest,   rid: osx-x64,     archive: tar.gz }
+          - { os: macos-latest,   rid: osx-arm64,   archive: tar.gz }
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG_NAME: ${{ needs.validate-tag.outputs.tag }}
+      RID: ${{ matrix.rid }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Publish single-file
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish src/AristaMcp.Cli/AristaMcp.Cli.csproj \
+            --configuration Release \
+            --runtime "$RID" \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:PublishTrimmed=false \
+            -p:Version="${TAG_NAME#v}" \
+            --output "publish/$RID"
+
+      - name: Stage release artefacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="stage/arista-mcp-$TAG_NAME-$RID"
+          mkdir -p "$stage"
+          cp -r "publish/$RID/." "$stage/"
+          # Top-level docs ship inside the archive so a freshly extracted
+          # bundle has README + LICENSE + CHANGELOG without a separate
+          # `git clone`.
+          cp README.md LICENSE CHANGELOG.md SECURITY.md "$stage/" 2>/dev/null || true
+          mkdir -p "$stage/docs" "$stage/deploy" "$stage/scripts" "$stage/docker"
+          cp -r docs/. "$stage/docs/" 2>/dev/null || true
+          cp -r deploy/. "$stage/deploy/" 2>/dev/null || true
+          # init.sql ships so `arista-mcp bootstrap` can mount it into a
+          # fresh PG container without a separate download.
+          cp docker/init.sql "$stage/docker/" 2>/dev/null || true
+          # Only ship cross-platform helper scripts in the bundle.
+          cp scripts/fetch-models.ps1 "$stage/scripts/" 2>/dev/null || true
+          cp scripts/dump-corpus.sh scripts/dump-corpus.ps1 "$stage/scripts/" 2>/dev/null || true
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="arista-mcp-$TAG_NAME-$RID.tar.gz"
+          (cd stage && tar -czf "../$archive" "arista-mcp-$TAG_NAME-$RID")
+          sha256sum "$archive" > "$archive.sha256"
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $name    = "arista-mcp-$env:TAG_NAME-$env:RID"
+          $archive = "$name.zip"
+          Compress-Archive -Path "stage/$name" -DestinationPath $archive
+          Get-FileHash $archive -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $archive" } |
+            Set-Content "$archive.sha256"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: ${{ env.TAG_NAME }}
+          draft: false
+          prerelease: ${{ contains(env.TAG_NAME, '-') }}
+          files: |
+            arista-mcp-*.tar.gz
+            arista-mcp-*.tar.gz.sha256
+            arista-mcp-*.zip
+            arista-mcp-*.zip.sha256
+
+  # ──────────────────────────────────────────────────────────────────
+  # GATE 3 — multi-arch container image, signed with cosign keyless,
+  # pushed to GHCR.
+  # ──────────────────────────────────────────────────────────────────
+  container:
+    name: container
+    needs: [ci-mirror, validate-tag]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      TAG_NAME: ${{ needs.validate-tag.outputs.tag }}
+      VERSION: ${{ needs.validate-tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if Containerfile missing
+        id: precheck
+        shell: bash
+        run: |
+          if [ ! -f docker/Containerfile.app ]; then
+            echo "Containerfile.app not present yet — skipping container build."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        if: steps.precheck.outputs.skip != 'true'
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        if: steps.precheck.outputs.skip != 'true'
+
+      - name: Log in to GHCR
+        if: steps.precheck.outputs.skip != 'true'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Container metadata
+        if: steps.precheck.outputs.skip != 'true'
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ env.VERSION }}
+            type=raw,value=${{ env.TAG_NAME }}
+            type=raw,value=latest,enable=${{ !contains(env.TAG_NAME, '-') }}
+
+      - name: Build and push
+        if: steps.precheck.outputs.skip != 'true'
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: docker/Containerfile.app
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: false
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            COMMIT=${{ github.sha }}
+
+      - name: Install cosign
+        if: steps.precheck.outputs.skip != 'true'
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+
+      - name: Sign image (keyless)
+        if: steps.precheck.outputs.skip != 'true'
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "$IMAGE"
+
+  # ──────────────────────────────────────────────────────────────────
+  # GATE 4 — corpus dump bring-forward.
+  #
+  # The full corpus requires a populated PG (~25 min ingest, models +
+  # source PDFs); we can't regenerate from CI. Instead, copy the most
+  # recent release's arista-corpus-*.dump into this release so every
+  # tag has a usable restore asset.
+  #
+  # Idempotent: skips if the new release already has the asset (e.g.
+  # the operator pre-uploaded a fresh dump via scripts/dump-corpus.sh).
+  # ──────────────────────────────────────────────────────────────────
+  corpus-dump:
+    name: corpus dump
+    needs: [validate-tag, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG_NAME: ${{ needs.validate-tag.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bring-forward last release's corpus dump
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          asset="arista-corpus-${TAG_NAME}.dump"
+          repo="${{ github.repository }}"
+          mkdir -p _carry
+
+          # Skip if the new release already has the asset (someone ran
+          # scripts/dump-corpus.sh manually before/after tagging).
+          existing="$(gh release view "$TAG_NAME" -R "$repo" \
+            --json assets --jq ".assets[] | select(.name == \"$asset\") | .name" \
+            2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            echo "release $TAG_NAME already has $asset — nothing to bring forward."
+            exit 0
+          fi
+
+          # Find the most recent release that has any arista-corpus-*.dump.
+          # Filter out the current tag so we don't try to copy from itself.
+          src_tag="$(gh release list -R "$repo" --limit 30 \
+            --json tagName --jq '.[].tagName' \
+            | while read -r t; do
+                [ "$t" = "$TAG_NAME" ] && continue
+                has="$(gh release view "$t" -R "$repo" \
+                  --json assets \
+                  --jq '.assets[] | select(.name | startswith("arista-corpus-") and endswith(".dump")) | .name' \
+                  2>/dev/null | head -n1 || true)"
+                if [ -n "$has" ]; then
+                  printf '%s\t%s\n' "$t" "$has"
+                  break
+                fi
+              done)"
+
+          if [ -z "$src_tag" ]; then
+            echo "no previous release carries an arista-corpus-*.dump — nothing to do."
+            exit 0
+          fi
+
+          src_release="$(printf '%s' "$src_tag" | cut -f1)"
+          src_asset="$(printf '%s' "$src_tag" | cut -f2)"
+          echo "carrying forward $src_asset from $src_release -> $asset on $TAG_NAME"
+
+          gh release download "$src_release" -R "$repo" \
+            -p "$src_asset" -p "${src_asset}.sha256" -D _carry
+
+          mv "_carry/$src_asset" "_carry/$asset"
+          if [ -f "_carry/${src_asset}.sha256" ]; then
+            # Rewrite the filename column inside the sha256 file.
+            old_sha="$(awk '{print $1}' "_carry/${src_asset}.sha256")"
+            printf '%s  %s\n' "$old_sha" "$asset" > "_carry/${asset}.sha256"
+            rm -f "_carry/${src_asset}.sha256"
+          fi
+
+          gh release upload "$TAG_NAME" -R "$repo" --clobber \
+            "_carry/$asset" \
+            $([ -f "_carry/${asset}.sha256" ] && echo "_carry/${asset}.sha256")
+
+  # ──────────────────────────────────────────────────────────────────
+  # Extract the [<tag>] block from CHANGELOG.md as release notes.
+  # Runs last so it overwrites whatever softprops/action-gh-release
+  # auto-generated.
+  # ──────────────────────────────────────────────────────────────────
+  finalize:
+    name: finalize release notes
+    needs: [publish, container, corpus-dump, validate-tag]
+    if: always() && needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG_NAME: ${{ needs.validate-tag.outputs.tag }}
+      VERSION: ${{ needs.validate-tag.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          # awk: collect lines between `## [<version>]` and the next
+          # `## [` heading (or the link-reference block at file end).
+          awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              if ($0 ~ "\\[" ver "\\]") found=1
+              next
+            }
+            /^\[.+\]:/ && found { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+
+          if [ ! -s release-notes.md ]; then
+            {
+              echo "## What's Changed"
+              echo
+              echo "See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/master/CHANGELOG.md) for details."
+            } > release-notes.md
+          fi
+          echo "── release notes ──"
+          cat release-notes.md
+          echo "──────────────────"
+
+      - name: Update release
+        run: gh release edit "$TAG_NAME" --notes-file release-notes.md

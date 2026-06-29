@@ -1,0 +1,65 @@
+[Unit]
+Description=arista-mcp PostgreSQL (vchord-suite pg18)
+# Wait for network online so port 5432 binds cleanly on host.
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=arista-mcp-postgres
+Image=docker.io/tensorchord/vchord-suite:pg18-latest
+
+# Mount data on a named volume, declared in the sibling .volume file.
+# pg18 images (tensorchord/vchord-suite, docker-library/postgres) place data
+# under /var/lib/postgresql/<major>/data and refuse to start if a mount lands
+# on the legacy /var/lib/postgresql/data path. Match docker/compose.yaml.
+Volume=arista-mcp-postgres.volume:/var/lib/postgresql/18/data:Z
+Environment=PGDATA=/var/lib/postgresql/18/data
+
+# Internal network so the server can reach `arista-mcp-postgres:5432`
+# without going through the host. Declared in the sibling .network file.
+Network=arista-mcp.network
+
+# Expose to the host on a non-default port so we don't collide with a
+# system-installed PG. 5434 matches docker/compose.yaml.
+PublishPort=127.0.0.1:5434:5432
+
+# Initial credentials. After first boot, harden via:
+#   ALTER USER arista WITH PASSWORD '...';
+# and update the env-file at /etc/arista-mcp.env.
+Environment=POSTGRES_DB=arista
+Environment=POSTGRES_USER=arista
+Environment=POSTGRES_PASSWORD=arista
+# Quote the value: quadlet-generator splits unquoted whitespace-separated
+# Environment= values into multiple --env flags, breaking the initdb invocation.
+Environment="POSTGRES_INITDB_ARGS=--data-checksums --encoding=UTF-8 --locale=C.UTF-8"
+
+# Mount our init.sql so vchord/vchord_bm25/pg_tokenizer are bootstrapped
+# on first start (the image only fires /docker-entrypoint-initdb.d/*.sql
+# when the data dir is empty).
+Volume=%h/.config/arista-mcp/init.sql:/docker-entrypoint-initdb.d/01-init.sql:Z,ro
+
+HealthCmd=pg_isready -U arista -d arista
+HealthInterval=10s
+HealthRetries=10
+HealthStartPeriod=30s
+HealthTimeout=5s
+
+# Auto-update against the registry tag at upgrade time. Pair with
+# `systemctl --user enable --now podman-auto-update.timer`.
+AutoUpdate=registry
+Label=io.containers.autoupdate=registry
+
+# Resource hints — tune via /etc/containers/systemd/arista-mcp-postgres.container.d/
+# drop-ins instead of editing this file in-place.
+PodmanArgs=--shm-size=2g
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300s
+# Ingest can be slow on first boot — give the data dir room to populate.
+
+[Install]
+# Auto-start on user boot. Move to multi-user.target for system-wide
+# rootful installs.
+WantedBy=default.target

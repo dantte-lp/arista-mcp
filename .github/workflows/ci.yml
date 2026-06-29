@@ -6,6 +6,8 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+  # Allow release.yml to call this workflow as a gate-1 mirror.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}

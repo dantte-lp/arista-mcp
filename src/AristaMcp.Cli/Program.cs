@@ -14,6 +14,7 @@ internal static class Program
             BenchCommand.Build(),
             CurateTriplesCommand.Build(),
             ValidateBenchQueriesCommand.Build(),
+            BootstrapCommand.Build(),
         };
 
         return root.Parse(args).InvokeAsync();

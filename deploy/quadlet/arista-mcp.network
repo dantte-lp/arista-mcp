@@ -1,0 +1,10 @@
+[Unit]
+Description=arista-mcp internal network
+
+[Network]
+NetworkName=arista-mcp
+# Internal-only network — the server connects to PG over this network.
+# The MCP server's HTTP listener still publishes via the host port from
+# its own .container unit.
+Driver=bridge
+DisableDNS=false
