@@ -38,11 +38,34 @@ public static class BootstrapCommand
 #pragma warning restore S2068
     private const int DefaultHostPort = 5434;
 
-    // Release-attachment URL pattern. Tag is interpolated; the asset
-    // is the dump produced by the release pipeline.
+    // Release-attachment URL pattern. The placeholder is the full tag
+    // (with the leading `v`) — both the manual v0.3.0 corpus upload
+    // and the release.yml `corpus-dump` bring-forward job name the
+    // asset `arista-corpus-${TAG_NAME}.dump`, so the tag must match
+    // verbatim. Earlier the template used a separate `{version}`
+    // placeholder (tag without `v`), which produced URLs that 404'd
+    // against the actual asset names — fixed before v0.3.1.
     private static readonly System.Text.CompositeFormat s_releaseDumpAssetTemplate =
         System.Text.CompositeFormat.Parse(
-            "https://github.com/dantte-lp/arista-mcp/releases/download/{0}/arista-corpus-{1}.dump");
+            "https://github.com/dantte-lp/arista-mcp/releases/download/{0}/arista-corpus-{0}.dump");
+
+    // Operator may type the tag with or without the leading `v` (e.g.
+    // `--release v0.3.1` vs `--release 0.3.1`). Re-add `v` when missing so
+    // the URL contract with the release pipeline holds.
+    public static string NormaliseTag(string tag)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tag);
+        return tag.StartsWith('v') ? tag : "v" + tag;
+    }
+
+    // Builds the public release-attachment URL for the corpus dump of a given
+    // tag. Stable contract relied on by the BootstrapCommand and by automation
+    // (anything driving `arista-mcp bootstrap --release <tag>` upstream).
+    public static string BuildCorpusDumpUrl(string tag)
+    {
+        return string.Format(CultureInfo.InvariantCulture,
+            s_releaseDumpAssetTemplate, NormaliseTag(tag));
+    }
 
     public static Command Build()
     {
@@ -291,15 +314,15 @@ public static class BootstrapCommand
         }
 
         string tag = args.Release;
-        string version = tag.StartsWith('v') ? tag[1..] : tag;
-        string url = string.Format(CultureInfo.InvariantCulture, s_releaseDumpAssetTemplate, tag, version);
+        string tagWithV = NormaliseTag(tag);
+        string url = BuildCorpusDumpUrl(tag);
         // The URL is built from a fixed CompositeFormat with our own
-        // tag/version inputs, so it cannot escape https://github.com/.
+        // tag input, so it cannot escape https://github.com/.
 
         console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
             $"  corpus   downloading [green]{url}[/]");
 
-        string tmpHostPath = Path.Combine(Path.GetTempPath(), $"arista-corpus-{version}.dump");
+        string tmpHostPath = Path.Combine(Path.GetTempPath(), $"arista-corpus-{tagWithV}.dump");
         try
         {
             await DownloadFileAsync(url, tmpHostPath, console, ct).ConfigureAwait(false);
