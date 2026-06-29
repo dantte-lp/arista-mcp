@@ -8,6 +8,26 @@ Dates use ISO-8601.
 
 ## [Unreleased]
 
+_(no entries yet)_
+
+## [0.3.1] — 2026-06-30
+
+First release through the new `release.yml` pipeline. Ships:
+
+- Single-file self-contained binaries for **6 RIDs** — `linux-x64`,
+  `linux-arm64`, `win-x64`, `win-arm64`, `osx-x64`, `osx-arm64` —
+  each with a SHA-256 sidecar.
+- **Multi-arch container** on `ghcr.io/dantte-lp/arista-mcp:v0.3.1`
+  (`linux/amd64`, `linux/arm64`), signed with `cosign` keyless OIDC.
+- **Corpus dump** carry-forward from v0.3.0 — operators can run
+  `arista-mcp bootstrap --release v0.3.1` and get a populated PG
+  without the ~25 min ingest.
+
+The infrastructure landed in v0.3.0 (`feat(install): one-shot
+bootstrap + multi-RID release pipeline + Quadlet`, #25) but was
+never exercised because no tag was cut between then and now. This
+release closes the install-readiness loop.
+
 ### Added
 
 - **`AristaMcpSettings.RerankerDir`** override — `deploy/systemd/arista-mcp.env.example`
@@ -86,6 +106,13 @@ Dates use ISO-8601.
 
 ### Fixed
 
+- **`BootstrapCommand` corpus dump URL contract** — the template used
+  a separate `{version}` placeholder (tag without `v`) while the
+  release pipeline names the asset `arista-corpus-${TAG_NAME}.dump`
+  (with `v`). The resulting URL 404'd against the real asset on every
+  bootstrap invocation. `BuildCorpusDumpUrl(tag)` is now a public,
+  regression-guarded helper that normalises the tag and matches the
+  pipeline output verbatim. Caught by audit before the v0.3.1 cut.
 - **`e2e.yml` branch trigger** corrected from `[main]` to `[master]`
   (porting artefact from the sibling nutanix-mcp repo). The E2E suite
   now actually runs on PRs and pushes to `master`; `workflow_call` is
@@ -661,7 +688,8 @@ vchord_bm25 0.3.0 + pg_tokenizer 0.1.1.
 
 ---
 
-[Unreleased]: https://github.com/dantte-lp/arista-mcp/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/dantte-lp/arista-mcp/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/dantte-lp/arista-mcp/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/dantte-lp/arista-mcp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dantte-lp/arista-mcp/compare/v0.1.4...v0.2.0
 [v0.1.4]: https://github.com/dantte-lp/arista-mcp/compare/v0.1.3...v0.1.4
