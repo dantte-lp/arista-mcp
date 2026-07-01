@@ -1,0 +1,15 @@
+{
+  "name": "arista-mcp",
+  "owner": {
+    "name": "dantte-lp",
+    "url": "https://github.com/dantte-lp"
+  },
+  "plugins": [
+    {
+      "name": "arista-mcp",
+      "source": "./plugin",
+      "description": "Hybrid retrieval over the Arista Networks documentation corpus via the arista-mcp MCP server.",
+      "version": "0.3.1"
+    }
+  ]
+}
