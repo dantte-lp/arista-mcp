@@ -1,0 +1,30 @@
+{
+  "name": "arista-mcp",
+  "version": "0.3.1",
+  "description": "Hybrid retrieval over the Arista Networks documentation corpus via the arista-mcp MCP server (dense snowflake-arctic-embed-m + BM25 through vchord_bm25 + cross-encoder rerank).",
+  "author": {
+    "name": "dantte-lp",
+    "url": "https://github.com/dantte-lp"
+  },
+  "homepage": "https://github.com/dantte-lp/arista-mcp",
+  "repository": "https://github.com/dantte-lp/arista-mcp.git",
+  "license": "MIT",
+  "keywords": [
+    "arista",
+    "mcp",
+    "rag",
+    "retrieval",
+    "documentation",
+    "search",
+    "eos",
+    "evpn",
+    "vxlan",
+    "bgp",
+    "cloudvision",
+    "postgres",
+    "pgvector"
+  ],
+  "commands": "./commands",
+  "skills": "./skills",
+  "mcpServers": "./.mcp.json"
+}

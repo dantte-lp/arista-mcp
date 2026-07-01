@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "arista-mcp": {
+      "command": "arista-mcp",
+      "args": ["serve", "--transport", "stdio"],
+      "env": {
+        "ARISTA_MCP__ConnectionString": "${ARISTA_MCP__ConnectionString}",
+        "ARISTA_MCP__ModelsDir": "${ARISTA_MCP__ModelsDir}"
+      }
+    }
+  }
+}
