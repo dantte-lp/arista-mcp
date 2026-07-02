@@ -10,6 +10,51 @@ Dates use ISO-8601.
 
 _(no entries yet)_
 
+## [0.3.2] — 2026-07-02
+
+Patch release: fixes a `search_docs`-only regression on stores
+provisioned via `arista-mcp bootstrap --release`, and lands the
+post-v0.3.1 documentation refresh.
+
+### Fixed
+
+- **`arista-mcp bootstrap`** re-registers the `vchord_bm25` tokenizer
+  catalog after `pg_restore` (#29). `pg_restore --clean --if-exists`
+  wipes the `tokenizer_catalog` rows (`text_analyzer`, `tokenizer`,
+  `model`) but leaves the vocab-storage table and the two BEFORE
+  INSERT/UPDATE triggers on `chunks` behind. `chunks.bm25v` gets
+  repopulated correctly, so `list_documents` / `get_document` /
+  `get_status` keep working — but `search_docs` throws
+  `XX000: Tokenizer not found: chunks_tokenizer` at the sparse SQL
+  path. `RestoreCorpusAsync` now runs an idempotent `DO $$ … $$`
+  block after every successful `pg_restore` that recreates
+  `english_analyzer` + `chunks_tokenizer` + `chunks_model` when
+  they are missing, purging orphan triggers first.
+
+### Changed
+
+- **Docs refresh: install-first, feature catch-up, version pins** (#28).
+  `docs/en/getting-started.md` leads with the three shipped install
+  paths (`scripts/install.sh`, `arista-mcp bootstrap`, source build);
+  the source build was previously the only documented flow.
+  `docs/mcp-integration.md` swaps the stale `~/.claude/mcp_servers.json`
+  recipe for the current `~/.claude.json` layout, documents
+  `serve --bind` + `GET /v1/healthz`, and rewrites the `search_docs`
+  example to the shipped snake_case shape. `docs/en/retrieval.md`
+  covers the Sprint-14 multi-query expander, the Sprint-16 listwise
+  LLM re-ranker (both off by default — regressed on the v2 bench),
+  and the Sprint-15.1 parent-child `chunk_kind='leaf'` filter.
+  `docs/en/benchmarking.md` extends the mermaid timeline through
+  the shipped v0.3.1 baseline (93.86 % top-1). Version-pin refresh:
+  documented .NET SDK 10.0.201 → 10.0.301 (matches `global.json`),
+  MCP SDK 1.2.0 → 1.4.0, ONNX Runtime 1.24.4 → 1.27.0,
+  `System.CommandLine` 2.0.6 → 2.0.9. `docs/ru/` mirror updated
+  in the same PR.
+- `README.md` gains a compact release-artefact matrix; `plugin/README.md`
+  documents the `arista-mcp@arista-mcp` marketplace-install
+  disambiguation; `scripts/install.sh` drops the self-mocking
+  `arista-mcp get-status` line.
+
 ## [0.3.1] — 2026-06-30
 
 First release through the new `release.yml` pipeline. Ships:
