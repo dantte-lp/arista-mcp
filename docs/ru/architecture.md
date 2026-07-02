@@ -193,16 +193,16 @@ erDiagram
 
 ## Версии стека
 
-По состоянию v0.1.4, из `Directory.Packages.props`:
+По состоянию на v0.3.1, из `Directory.Packages.props`:
 
 | Пакет                                   | Версия   |
 |-----------------------------------------|----------|
-| .NET SDK                                | 10.0.201 |
-| ModelContextProtocol                    | 1.2.0    |
+| .NET SDK                                | 10.0.301 |
+| ModelContextProtocol / .AspNetCore      | 1.4.0    |
 | EF Core + Npgsql.EFCore + Pgvector.EFCore | 9.0.15 / 9.0.4 / 0.3.0 (держим ради Pgvector) |
-| Microsoft.ML.OnnxRuntime                | 1.24.4   |
+| Microsoft.ML.OnnxRuntime (CPU / .Gpu)   | 1.27.0   |
 | Microsoft.ML.Tokenizers                 | 2.0.0    |
-| System.CommandLine                      | 2.0.6    |
+| System.CommandLine                      | 2.0.9    |
 | PostgreSQL                              | 18 (образ tensorchord/vchord-suite) |
 | pgvector / vchord / vchord_bm25 / pg_tokenizer | 0.8.2 / 1.1.1 / 0.3.0 / 0.1.1 |
 

@@ -34,59 +34,60 @@ flowchart LR
 
 Гибридный dense + sparse + rerank поиск.
 
-**Вход**
+**Вход** — аргументы, которые инструмент принимает. `candidatePoolSize`
+и `rerankTopN` **не являются** параметрами вызова; они вычисляются
+внутри как `max(50, topK*5)` и `max(30, topK*3)` соответственно.
 
-| Поле              | Тип       | Дефолт  | Примечания                                              |
-|-------------------|-----------|---------|----------------------------------------------------------|
-| `query`           | string    | —       | Обязательный.                                            |
-| `limit`           | int       | 5       | Размер финальной страницы. Ограничено 1–50.              |
-| `category`        | string?   | null    | `manual`, `release-notes`, `kb`, `portal` и т.п.         |
-| `product`         | string?   | null    | `eos`, `cvp`, `dmf`, `cva`, `cvw`, `hardware` и т.п.     |
-| `candidatePoolSize` | int     | 50      | Пул на ranker перед RRF-фьюжном.                         |
-| `rerankTopN`      | int       | 30      | Потолок глубины cross-encoder. Адаптивный floor = 10.    |
-| `dedupPerSection` | bool      | false   | Выкинуть дубли чанков из одной секции.                   |
-| `returnDiagnostics` | bool    | false   | Включить `SearchDiagnostics` в ответ.                    |
+| Поле               | Тип       | Дефолт  | Примечания                                              |
+|--------------------|-----------|---------|----------------------------------------------------------|
+| `query`            | string    | —       | Обязательный.                                            |
+| `topK`             | int       | 10      | Размер финальной страницы. Ограничено 1–50.              |
+| `category`         | string?   | null    | Живые значения: `manual`, `reference`, `toi`.            |
+| `product`          | string?   | null    | Живые значения: `eos`, `cvp`, `dmf`, `cv-cue`, `cvw`, `hardware`, `aboot`, `cva`, `mss`, `velocloud`, `cloudeos`, `analytics`, `campus`, `avd`. |
+| `dedupPerSection`  | bool      | false   | Выкинуть дубли чанков из одной пары документ + секция.   |
+| `withDiagnostics`  | bool      | false   | Включить в ответ per-stage диагностику.                  |
 
-**Выход** — `SearchResponse`:
+**Выход** — snake_case-форма, которую эмитит `SearchDocsTool` (источник
+истины: `src/AristaMcp.Server/Tools/SearchDocsTool.cs`).
 
 ```jsonc
 {
   "results": [
     {
-      "chunkId": 12345,
-      "documentId": "abc123",
-      "documentTitle": "Arista Switch 7050X3 Series Data Sheet",
-      "documentSlug": "7050X3-Datasheet",
+      "chunk_id": 12345,
+      "document_id": "abc123",
+      "document_title": "Arista Switch 7050X3 Series Data Sheet",
+      "document_slug": "7050X3-Datasheet",
       "category": "manual",
       "product": "hardware",
-      "sectionTitle": "MLAG configuration",
-      "sectionLevel": 2,
-      "pageStart": 42,
-      "pageEnd": 44,
-      "content": "...",           // включает префикс "{doc} > {section}\n\n"
-      "rawContent": "...",         // display-safe
-      "rerankScore": 9.81,
-      "denseSimilarity": 0.87,
-      "bm25Score": 4.2
+      "version": null,
+      "section_title": "MLAG configuration",
+      "page_start": 42,
+      "page_end": 44,
+      "score": 9.81,
+      "content": "..."             // включает префикс "{doc} > {section}\n\n"
     }
   ],
-  "diagnostics": {                 // только при returnDiagnostics=true
-    "denseHits": 50,
-    "sparseHits": 43,
-    "afterRrf": 78,
-    "afterRerank": 30,
-    "embedMs": 11.4,
-    "denseQueryMs": 7.3,
-    "sparseQueryMs": 5.1,
-    "rrfMs": 0.2,
-    "rerankMs": 48.2,
-    "totalMs": 73.1,
-    "hydeMs": 0,
-    "hydeHit": false,
-    "hydeFallback": false
+  "diagnostics": {                  // только при withDiagnostics=true
+    // per-stage тайминги и счётчики из SearchDiagnostics (PascalCase-
+    // свойства: DenseHits, SparseHits, AfterRrf, AfterRerank,
+    // EmbedMs, DenseQueryMs, SparseQueryMs, RrfMs, RerankMs, TotalMs,
+    // HydeMs, HydeHit, HydeFallback, ListwiseMs, ListwiseHit,
+    // ListwiseFallback)
   }
 }
 ```
+
+Замечания:
+
+- `score` — это **скор cross-encoder-реранка**. Dense/BM25 sub-скоры
+  сливаются через RRF до реранка и на результат не выводятся. Включи
+  `withDiagnostics`, чтобы увидеть per-stage счётчики и тайминги.
+- `version` заполняется только для документов, у которых в каталоге
+  проставлен тег версии (например, EOS-релиз для `eos`-доков); часто
+  null.
+- Ни `section_level`, ни `rawContent`, ни отдельных полей
+  `rerank_score` / `dense_similarity` / `bm25_score`.
 
 **Пример**
 
@@ -97,9 +98,9 @@ flowchart LR
     "name": "search_docs",
     "arguments": {
       "query": "MLAG peer-link configuration on 7050X3",
-      "limit": 5,
+      "topK": 5,
       "product": "eos",
-      "returnDiagnostics": true
+      "withDiagnostics": true
     }
   }
 }

@@ -14,7 +14,7 @@ Solution определён в `arista-mcp.slnx`. Central package management
 живёт в `Directory.Packages.props` — **версии добавлять туда**, не
 в project-файлы.
 
-`global.json` пинит SDK на 10.0.201.
+`global.json` пинит SDK на 10.0.301.
 
 ## Тесты
 
