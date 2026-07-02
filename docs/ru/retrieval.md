@@ -71,6 +71,16 @@ Arista.
 4.6 pp на v2-бенче — задокументировано ради истории, инфраструктура
 оставлена для будущих экспериментов с domain-tuned переписывателем.
 
+## Этап 2b — Multi-query expansion (opt-in)
+
+При `ARISTA_MCP__MultiQuery__Enabled=true` `NoopMultiQueryExpander`
+заменяется на rule-based expander, который эмитит `1..N` переформулировок
+исходного запроса (по умолчанию `N=3`). Каждая переформулировка идёт
+своим dense + sparse проходом; результаты сливаются до RRF. Sprint 14
+накатил инфру — v2-бенч регрессировал на 1.1 pp top-1, так что флаг по
+умолчанию выключен. Инфраструктура сохранена, потому что дизайнерская
+работа уже оплачена.
+
 ## Этап 3 — Эмбеддинг (dense-ветка)
 
 `OnnxEmbedder` гоняет `snowflake-arctic-embed-m-v1.5` на ONNX Runtime:
@@ -122,6 +132,12 @@ LIMIT $candidatePoolSize;
 `tokenizer_catalog.create_custom_model_tokenizer_and_trigger`. В
 колонку не пишем из application-кода.
 
+Оба запроса несут предикат `WHERE c.chunk_kind = 'leaf'` (parent-child
+чанкинг Sprint 15.1). За recall конкурируют только leaf-чанки; parent-узлы
+остаются в корпусе для секционного lookup'а, но невидимы для гибридного
+поиска. См. `docs/en/architecture.md` — колонки `chunks.parent_id` /
+`chunks.chunk_kind` кодируют дерево.
+
 ## Этап 5 — Reciprocal Rank Fusion
 
 ```
@@ -170,6 +186,16 @@ sparseRows, options.RrfK)` через
 `token_type_ids`, fairseq-offset remap): используется
 bge-reranker-v2-m3 и т.п.
 
+## Этап 7b — Listwise LLM re-rank (opt-in)
+
+При `ARISTA_MCP__ListwiseRerank__Enabled=true` после cross-encoder'а
+подключается `LlamaCppListwiseReranker`. Реранкер POST'ит top-5
+кандидатов одним промптом на тот же llama.cpp-совместимый chat-endpoint,
+что и HyDE, просит LLM вернуть JSON-перестановку и переупорядочивает
+top-5 соответственно. Sprint 16 накатил инфру — v2-бенч регрессировал
+на 2.4 pp top-1, так что флаг по умолчанию выключен. Инфраструктура
+сохранена, чтобы вернуться с domain-tuned скорером.
+
 ## Этап 8 — Dedup + limit
 
 `DedupPerSection` выкидывает более низкоскоренные чанки с общим
@@ -215,6 +241,8 @@ public sealed record SearchDiagnostics(
 | Оркестрация            | `src/AristaMcp.Server/Retrieval/HybridRetriever.cs`           |
 | Раскрытие запроса      | `src/AristaMcp.Core/Retrieval/QueryExpander.cs`               |
 | HyDE                   | `src/AristaMcp.Core/Retrieval/IHydeExpander.cs`, `src/AristaMcp.Server/Retrieval/HydeExpander.cs` |
+| Multi-query expansion  | `src/AristaMcp.Core/Retrieval/IMultiQueryExpander.cs`, `RuleBasedMultiQueryExpander.cs` |
+| Listwise LLM re-rank   | `src/AristaMcp.Server/Retrieval/LlamaCppListwiseReranker.cs`  |
 | Эмбеддер               | `src/AristaMcp.Embedding/OnnxEmbedder.cs`                     |
 | Переключатель реранкер | `src/AristaMcp.Core/Settings/RerankerFamilyDetector.cs`       |
 | RRF + адаптивный cap   | `HybridRetriever.ReciprocalRankFusion`, `ComputeAdaptiveRerankTopN` |

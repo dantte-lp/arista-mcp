@@ -190,16 +190,16 @@ erDiagram
 
 ## Tech stack version pins
 
-As of v0.1.4, from `Directory.Packages.props`:
+As of v0.3.1, from `Directory.Packages.props`:
 
 | Package                                 | Version  |
 |-----------------------------------------|----------|
-| .NET SDK                                | 10.0.201 |
-| ModelContextProtocol                    | 1.2.0    |
+| .NET SDK                                | 10.0.301 |
+| ModelContextProtocol / .AspNetCore      | 1.4.0    |
 | EF Core + Npgsql.EFCore + Pgvector.EFCore | 9.0.15 / 9.0.4 / 0.3.0 (held for Pgvector compat) |
-| Microsoft.ML.OnnxRuntime                | 1.24.4   |
+| Microsoft.ML.OnnxRuntime (CPU / .Gpu)   | 1.27.0   |
 | Microsoft.ML.Tokenizers                 | 2.0.0    |
-| System.CommandLine                      | 2.0.6    |
+| System.CommandLine                      | 2.0.9    |
 | PostgreSQL                              | 18 (tensorchord/vchord-suite image) |
 | pgvector / vchord / vchord_bm25 / pg_tokenizer | 0.8.2 / 1.1.1 / 0.3.0 / 0.1.1 |
 

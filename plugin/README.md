@@ -36,8 +36,18 @@ Optional (production INT8 / fine-tune reranker):
 
 ```
 /plugin marketplace add https://github.com/dantte-lp/arista-mcp
-/plugin install arista-mcp
+/plugin install arista-mcp@arista-mcp
 ```
+
+The `@arista-mcp` suffix disambiguates the plugin against any other
+marketplace that exposes a plugin of the same name. When there is no
+collision, `/plugin install arista-mcp` alone works.
+
+If you already ran `bash scripts/install.sh` from a release tarball,
+the marketplace symlink is already staged under
+`~/.claude/plugins/marketplaces/arista-mcp/` — restart Claude Code and
+`/plugin install arista-mcp` finds it locally without hitting the
+network.
 
 Then set the two env vars in the shell that launches `claude`, or add
 them into `~/.claude.json` under the `mcpServers.arista-mcp.env` block.

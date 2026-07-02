@@ -14,7 +14,7 @@ Solution is defined in `arista-mcp.slnx`. Central package management
 lives in `Directory.Packages.props` — **add versions there, not in
 project files**.
 
-`global.json` pins the SDK to 10.0.201.
+`global.json` pins the SDK to 10.0.301.
 
 ## Test
 

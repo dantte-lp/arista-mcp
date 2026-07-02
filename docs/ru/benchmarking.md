@@ -25,7 +25,16 @@ timeline
     v0.2.1 rebench   : 88.61
     v0.2.2 rebench   : 87.07
     v0.2.3 rebench   : 86.22
+    v0.2.4 v2m3-ft   : 92.86
+    v0.3.0 pc-chunks : 93.20
+    v0.3.1 shipped   : 93.86
 ```
+
+Строка v0.3.1 — это заявленная в v0.3.1 baseline: 570-запросная
+v2-фикстура, bge-m3 dense + vchord_bm25 sparse + RRF (k=60) +
+`bge-reranker-v2-m3` INT8 fine-tune. Parent-child leaf-фильтрация
+включена; multi-query expansion и listwise LLM re-rank выключены (оба
+регрессировали на v2 и оставлены под флагами).
 
 ## Две версии бенча, один harness
 

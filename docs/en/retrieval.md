@@ -67,6 +67,15 @@ Current status: off by default. The v0.2.3 probe regressed top-1 by
 4.6 pp on the v2 bench — documented for provenance, infrastructure
 retained for future experiments with a domain-tuned rewriter.
 
+## Stage 2b — Multi-query expansion (opt-in)
+
+`ARISTA_MCP__MultiQuery__Enabled=true` swaps `NoopMultiQueryExpander`
+for a rule-based expander that emits `1..N` reformulations of the raw
+query (default `N=3`). Each reformulation runs its own dense + sparse
+pass; results are merged before RRF. Sprint 14 shipped the plumbing —
+the v2 bench regressed by 1.1 pp top-1 so the flag stays off by default.
+Infrastructure kept because the design cost is paid.
+
 ## Stage 3 — Embedding (dense path)
 
 `OnnxEmbedder` runs `snowflake-arctic-embed-m-v1.5` on ONNX Runtime:
@@ -118,6 +127,12 @@ ASC` ranks the best matches first.
 `tokenizer_catalog.create_custom_model_tokenizer_and_trigger`. You never
 write to it from application code.
 
+Both queries carry a `WHERE c.chunk_kind = 'leaf'` predicate
+(Sprint 15.1 parent-child chunking). Only leaf-level chunks compete for
+recall; parent nodes stay in the corpus for section-level lookups but
+are invisible to hybrid search. See `docs/en/architecture.md` — the
+`chunks.parent_id`/`chunks.chunk_kind` columns encode the tree.
+
 ## Stage 5 — Reciprocal Rank Fusion
 
 ```
@@ -166,6 +181,17 @@ re-sorts the fused candidates by this score.
 **XLM-R SentencePiece pairing** (`<s> q </s></s> d </s>`, no
 `token_type_ids`, fairseq-offset remap): used by bge-reranker-v2-m3 etc.
 
+## Stage 7b — Listwise LLM re-rank (opt-in)
+
+`ARISTA_MCP__ListwiseRerank__Enabled=true` wires
+`LlamaCppListwiseReranker` after the cross-encoder. The reranker POSTs
+the top-5 candidates as a single prompt to the same
+llama.cpp-compatible chat endpoint HyDE uses, asks the LLM to return a
+JSON permutation, and swaps the top-5 order accordingly. Sprint 16
+shipped the plumbing — the v2 bench regressed by 2.4 pp top-1 so the
+flag stays off by default. Infrastructure kept for revisit with a
+domain-tuned scorer.
+
 ## Stage 8 — Dedup + limit
 
 `DedupPerSection` drops lower-scored chunks that share `(document_id,
@@ -211,6 +237,8 @@ Enable OTLP export via `ARISTA_MCP__Otel__Endpoint=http://localhost:4317`
 | Orchestration          | `src/AristaMcp.Server/Retrieval/HybridRetriever.cs`           |
 | Query expansion        | `src/AristaMcp.Core/Retrieval/QueryExpander.cs`               |
 | HyDE                   | `src/AristaMcp.Core/Retrieval/IHydeExpander.cs`, `src/AristaMcp.Server/Retrieval/HydeExpander.cs` |
+| Multi-query expansion  | `src/AristaMcp.Core/Retrieval/IMultiQueryExpander.cs`, `RuleBasedMultiQueryExpander.cs` |
+| Listwise LLM re-rank   | `src/AristaMcp.Server/Retrieval/LlamaCppListwiseReranker.cs`  |
 | Embedder               | `src/AristaMcp.Embedding/OnnxEmbedder.cs`                     |
 | Reranker family switch | `src/AristaMcp.Core/Settings/RerankerFamilyDetector.cs`       |
 | RRF + adaptive cap     | `HybridRetriever.ReciprocalRankFusion`, `ComputeAdaptiveRerankTopN` |
