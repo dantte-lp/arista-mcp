@@ -149,6 +149,12 @@ jobs:
           # Only ship cross-platform helper scripts in the bundle.
           cp scripts/fetch-models.ps1 "$stage/scripts/" 2>/dev/null || true
           cp scripts/dump-corpus.sh scripts/dump-corpus.ps1 "$stage/scripts/" 2>/dev/null || true
+          # install.sh drives the one-command end-user path referenced by
+          # README.md / docs/en/getting-started.md. Ship it too, otherwise
+          # `bash scripts/install.sh` from an extracted tarball fails with
+          # "No such file or directory".
+          cp scripts/install.sh "$stage/scripts/" 2>/dev/null || true
+          chmod +x "$stage/scripts/install.sh" 2>/dev/null || true
 
       - name: Archive (tar.gz)
         if: matrix.archive == 'tar.gz'
