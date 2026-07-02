@@ -366,6 +366,17 @@ public static class BootstrapCommand
                 }
             }
             console.MarkupLine("  corpus   [green]restored[/]");
+
+            // pg_restore --clean --if-exists wipes the tokenizer_catalog rows
+            // (text_analyzer, tokenizer, model) but leaves the vocab-storage
+            // table + BEFORE INSERT/UPDATE triggers behind, so BM25 queries
+            // throw "Tokenizer not found: chunks_tokenizer" at query time.
+            // Re-register them idempotently before returning success.
+            int repairRc = await RepairTokenizerCatalogAsync(runtime, args, console, ct).ConfigureAwait(false);
+            if (repairRc != 0)
+            {
+                return repairRc;
+            }
             return 0;
         }
         finally
@@ -379,6 +390,110 @@ public static class BootstrapCommand
             if (File.Exists(tmpHostPath))
             {
                 try { File.Delete(tmpHostPath); }
+                catch (IOException) { /* best-effort cleanup */ }
+                catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+            }
+        }
+    }
+
+    // Post-restore repair for the vchord_bm25 tokenizer catalog. pg_restore
+    // --clean --if-exists drops tokenizer_catalog rows without repopulating
+    // them from the dump, because the catalog data lives in an extension
+    // schema that is excluded from pg_dump by default. This method is
+    // idempotent — safe to re-run on a healthy DB.
+    private const string RepairTokenizerSql = """
+        DO $repair$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM tokenizer_catalog.text_analyzer WHERE name = 'english_analyzer'
+            ) THEN
+                PERFORM tokenizer_catalog.create_text_analyzer('english_analyzer', $toml$
+                    pre_tokenizer = "unicode_segmentation"
+                    [[character_filters]]
+                    to_lowercase = {}
+                    [[character_filters]]
+                    unicode_normalization = "nfkd"
+                    [[token_filters]]
+                    skip_non_alphanumeric = {}
+                    [[token_filters]]
+                    stopwords = "nltk_english"
+                    [[token_filters]]
+                    stemmer = "english_porter2"
+                $toml$);
+            END IF;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM tokenizer_catalog.tokenizer WHERE name = 'chunks_tokenizer'
+            ) THEN
+                -- Any of: BEFORE INSERT/UPDATE triggers on chunks, the
+                -- vocab-storage table tokenizer_catalog.model_chunks_model,
+                -- and the tokenizer_catalog.model metadata row may survive
+                -- as orphans across pg_restore or a prior drop_tokenizer
+                -- call. Purge them so create_custom_model_tokenizer_and_trigger
+                -- can recreate everything cleanly.
+                DROP TRIGGER IF EXISTS model_chunks_model_trigger        ON chunks;
+                DROP TRIGGER IF EXISTS model_chunks_model_trigger_insert ON chunks;
+                DROP TABLE   IF EXISTS tokenizer_catalog.model_chunks_model;
+                DELETE FROM tokenizer_catalog.model WHERE name = 'chunks_model';
+
+                PERFORM tokenizer_catalog.create_custom_model_tokenizer_and_trigger(
+                    tokenizer_name     => 'chunks_tokenizer',
+                    model_name         => 'chunks_model',
+                    text_analyzer_name => 'english_analyzer',
+                    table_name         => 'chunks',
+                    source_column      => 'content',
+                    target_column      => 'bm25v');
+            END IF;
+        END $repair$;
+        """;
+
+    private static async Task<int> RepairTokenizerCatalogAsync(
+        string runtime, BootstrapArgs args, IAnsiConsole console, CancellationToken ct)
+    {
+        console.MarkupLine("  tokenizer verifying / repairing catalog");
+
+        string localTmp = Path.Combine(
+            Path.GetTempPath(),
+            $"arista-tokenizer-repair-{Environment.ProcessId}.sql");
+        try
+        {
+            await File.WriteAllTextAsync(localTmp, RepairTokenizerSql, ct).ConfigureAwait(false);
+
+            int cpRc = await RunStreamingAsync(runtime,
+                $"cp \"{localTmp}\" \"{args.ContainerName}:/tmp/arista-tokenizer-repair.sql\"",
+                console, ct).ConfigureAwait(false);
+            if (cpRc != 0)
+            {
+                console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
+                    $"[red]error[/] failed to copy tokenizer repair script into container (exit {cpRc}).");
+                return cpRc;
+            }
+
+#pragma warning disable S2068 // Const credential — see DefaultPgPassword docstring.
+            int rc = await RunStreamingAsync(runtime,
+                $"exec -e PGPASSWORD={DefaultPgPassword} {args.ContainerName} " +
+                $"psql -U {DefaultUser} -d {DefaultDatabase} -v ON_ERROR_STOP=1 " +
+                $"-f /tmp/arista-tokenizer-repair.sql",
+                console, ct).ConfigureAwait(false);
+#pragma warning restore S2068
+            if (rc != 0)
+            {
+                console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
+                    $"[red]error[/] tokenizer_catalog repair failed (exit {rc}); search_docs will throw \"Tokenizer not found: chunks_tokenizer\" until fixed manually.");
+                return rc;
+            }
+
+            console.MarkupLine("  tokenizer [green]ready[/]");
+            return 0;
+        }
+        finally
+        {
+            await RunSilentAsync(runtime,
+                $"exec {args.ContainerName} rm -f /tmp/arista-tokenizer-repair.sql",
+                CancellationToken.None).ConfigureAwait(false);
+            if (File.Exists(localTmp))
+            {
+                try { File.Delete(localTmp); }
                 catch (IOException) { /* best-effort cleanup */ }
                 catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
             }
