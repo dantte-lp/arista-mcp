@@ -10,6 +10,20 @@ Dates use ISO-8601.
 
 _(no entries yet)_
 
+## [0.3.3] — 2026-07-02
+
+Packaging fix: ship the one-command install script in the release
+tarballs. No code changes.
+
+### Fixed
+
+- **`scripts/install.sh`** is now included in the release tarball's
+  `scripts/` folder (#30). `README.md` and `docs/en/getting-started.md`
+  document `bash scripts/install.sh` as the recommended install path
+  after extracting the tarball, but the v0.3.2 (and earlier) tarballs
+  only shipped `fetch-models.ps1` + `dump-corpus.{sh,ps1}` — the
+  documented path failed with `No such file or directory`.
+
 ## [0.3.2] — 2026-07-02
 
 Patch release: fixes a `search_docs`-only regression on stores
