@@ -18,8 +18,10 @@ Steps:
    (for example, `EOS`, `CVP`, `DMF`, `CV-CUE`, `CVW`, `hardware`,
    `aboot`, `CVA`, `MSS`, `VeloCloud`, `CloudEOS`, `analytics`, `campus`,
    `AVD`), pass it in `product`.
-3. If the query mentions an EOS version (for example, `4.22.0F`,
-   `4.30.4M`), pass it in `version`.
+3. If the user names an EOS version (for example, `4.22.0F`, `4.30.4M`),
+   embed the version string in the `query` text — `search_docs` has no
+   dedicated `version` argument; BM25 matches it against document
+   titles like `EOS-4_32_0F-Manual`.
 4. If the query maps to a category (`manual`, `reference`, `toi`
    — the TOI category holds the "Time-Of-Introduction" release notes),
    pass it in `category`.

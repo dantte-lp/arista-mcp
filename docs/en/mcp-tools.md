@@ -34,59 +34,59 @@ flowchart LR
 
 Hybrid dense + sparse + rerank retrieval.
 
-**Input**
+**Input** — arguments accepted by the tool. `candidatePoolSize` and
+`rerankTopN` are **not** callable parameters; they are derived
+internally as `max(50, topK*5)` and `max(30, topK*3)` respectively.
 
-| Field             | Type     | Default | Notes                                                    |
-|-------------------|----------|---------|----------------------------------------------------------|
-| `query`           | string   | —       | Required.                                                |
-| `limit`           | int      | 5       | Final result page size. Clamped to 1–50.                 |
-| `category`        | string?  | null    | `manual`, `release-notes`, `kb`, `portal`, etc.          |
-| `product`         | string?  | null    | `eos`, `cvp`, `dmf`, `cva`, `cvw`, `hardware`, etc.      |
-| `candidatePoolSize` | int    | 50      | Per-ranker pool before RRF fusion.                       |
-| `rerankTopN`      | int      | 30      | Cross-encoder depth cap. Adaptive floor = 10 when tight. |
-| `dedupPerSection` | bool     | false   | Drop duplicate chunks from the same section.             |
-| `returnDiagnostics` | bool   | false   | Include `SearchDiagnostics` in the response.             |
+| Field              | Type     | Default | Notes                                                     |
+|--------------------|----------|---------|-----------------------------------------------------------|
+| `query`            | string   | —       | Required.                                                 |
+| `topK`             | int      | 10      | Final result page size. Clamped to 1–50.                  |
+| `category`         | string?  | null    | Live values: `manual`, `reference`, `toi`.                |
+| `product`          | string?  | null    | Live values: `eos`, `cvp`, `dmf`, `cv-cue`, `cvw`, `hardware`, `aboot`, `cva`, `mss`, `velocloud`, `cloudeos`, `analytics`, `campus`, `avd`. |
+| `dedupPerSection`  | bool     | false   | Drop duplicate chunks from the same document + section.   |
+| `withDiagnostics`  | bool     | false   | Include per-stage diagnostics in the response.            |
 
-**Output** — `SearchResponse`:
+**Output** — snake_case shape emitted by `SearchDocsTool` (source of
+truth: `src/AristaMcp.Server/Tools/SearchDocsTool.cs`).
 
 ```jsonc
 {
   "results": [
     {
-      "chunkId": 12345,
-      "documentId": "abc123",
-      "documentTitle": "Arista Switch 7050X3 Series Data Sheet",
-      "documentSlug": "7050X3-Datasheet",
+      "chunk_id": 12345,
+      "document_id": "abc123",
+      "document_title": "Arista Switch 7050X3 Series Data Sheet",
+      "document_slug": "7050X3-Datasheet",
       "category": "manual",
       "product": "hardware",
-      "sectionTitle": "MLAG configuration",
-      "sectionLevel": 2,
-      "pageStart": 42,
-      "pageEnd": 44,
-      "content": "...",           // includes the "{doc} > {section}\n\n" prefix
-      "rawContent": "...",         // display-safe
-      "rerankScore": 9.81,
-      "denseSimilarity": 0.87,
-      "bm25Score": 4.2
+      "version": null,
+      "section_title": "MLAG configuration",
+      "page_start": 42,
+      "page_end": 44,
+      "score": 9.81,
+      "content": "..."             // includes the "{doc} > {section}\n\n" prefix
     }
   ],
-  "diagnostics": {                 // only if returnDiagnostics=true
-    "denseHits": 50,
-    "sparseHits": 43,
-    "afterRrf": 78,
-    "afterRerank": 30,
-    "embedMs": 11.4,
-    "denseQueryMs": 7.3,
-    "sparseQueryMs": 5.1,
-    "rrfMs": 0.2,
-    "rerankMs": 48.2,
-    "totalMs": 73.1,
-    "hydeMs": 0,
-    "hydeHit": false,
-    "hydeFallback": false
+  "diagnostics": {                  // only if withDiagnostics=true
+    // per-stage timings and counts from SearchDiagnostics (PascalCase
+    // properties: DenseHits, SparseHits, AfterRrf, AfterRerank,
+    // EmbedMs, DenseQueryMs, SparseQueryMs, RrfMs, RerankMs, TotalMs,
+    // HydeMs, HydeHit, HydeFallback, ListwiseMs, ListwiseHit,
+    // ListwiseFallback)
   }
 }
 ```
+
+Notes:
+
+- `score` is the **cross-encoder rerank score**. Dense/BM25 sub-scores are
+  fused via RRF before rerank and are not exposed on the result. Enable
+  `withDiagnostics` to see per-stage counts and timings.
+- `version` is populated only for documents whose catalog entry carries a
+  version tag (e.g. EOS release for `eos` docs); often null.
+- No `section_level`, no `rawContent`, no separate `rerank_score` /
+  `dense_similarity` / `bm25_score` fields.
 
 **Example**
 
@@ -97,9 +97,9 @@ Hybrid dense + sparse + rerank retrieval.
     "name": "search_docs",
     "arguments": {
       "query": "MLAG peer-link configuration on 7050X3",
-      "limit": 5,
+      "topK": 5,
       "product": "eos",
-      "returnDiagnostics": true
+      "withDiagnostics": true
     }
   }
 }

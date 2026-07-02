@@ -85,12 +85,32 @@ Linux / macOS / Windows. No `dotnet` SDK, no `git clone`, no re-ingest.
 Each release ships a self-contained single-file binary for all 6 RIDs
 plus a `pg_restore`-able corpus dump.
 
-### Linux / macOS
+### One-command install (Linux)
+
+```bash
+TAG=v0.3.1
+RID=linux-x64
+gh release download "$TAG" -R dantte-lp/arista-mcp \
+  -p "arista-mcp-${TAG}-${RID}.tar.gz"
+tar -xzf "arista-mcp-${TAG}-${RID}.tar.gz"
+cd "arista-mcp-${TAG}-${RID}"
+sudo bash scripts/install.sh
+```
+
+`scripts/install.sh` stages the binary under `/opt/apps/arista-mcp-${TAG}-linux-x64/`,
+symlinks `/usr/local/bin/arista-mcp`, fetches ONNX models into
+`/var/lib/arista-mcp/models`, runs `arista-mcp bootstrap --release "$TAG"`
+(Postgres container + corpus restore), registers the MCP server in
+`~/.claude.json` and via `codex mcp add`, and links the Claude Code
+plugin marketplace. Idempotent. Env-var overrides: `TAG=vX.Y.Z`,
+`MODELS_DIR=…`, `CONN_STRING=…`, `SKIP_BOOTSTRAP=1`.
+
+### Linux / macOS — manual bootstrap
 
 ```bash
 # 1. Pick the right RID — linux-x64, linux-arm64, osx-x64, osx-arm64.
 RID=linux-x64
-TAG=v0.3.0
+TAG=v0.3.1
 gh release download "$TAG" -R dantte-lp/arista-mcp \
   -p "arista-mcp-${TAG}-${RID}.tar.gz" -p "arista-mcp-${TAG}-${RID}.tar.gz.sha256"
 sha256sum -c "arista-mcp-${TAG}-${RID}.tar.gz.sha256"
@@ -114,7 +134,7 @@ pwsh scripts/fetch-models.ps1            # needs PowerShell 7+ on linux/macOS
 ### Windows
 
 ```powershell
-$TAG = 'v0.3.0'
+$TAG = 'v0.3.1'
 $RID = 'win-x64'                 # or win-arm64
 gh release download $TAG -R dantte-lp/arista-mcp `
   -p "arista-mcp-$TAG-$RID.zip" -p "arista-mcp-$TAG-$RID.zip.sha256"
@@ -137,9 +157,9 @@ pwsh deploy\windows\Install-AristaMcpService.ps1 `
 ### Container (any OS)
 
 ```bash
-podman pull ghcr.io/dantte-lp/arista-mcp:v0.3.0
+podman pull ghcr.io/dantte-lp/arista-mcp:v0.3.1
 # Cosign verify (keyless OIDC signature is added by the release pipeline):
-cosign verify ghcr.io/dantte-lp/arista-mcp:v0.3.0 \
+cosign verify ghcr.io/dantte-lp/arista-mcp:v0.3.1 \
   --certificate-identity-regexp '.+' \
   --certificate-oidc-issuer-regexp '.+'
 ```
@@ -201,10 +221,15 @@ Historical / operational notes: [`docs/mcp-integration.md`](docs/mcp-integration
 
 ## Current status
 
-- **v0.1.4** shipped — stock MiniLM reranker, 111-query bench.
-- **v0.3.0 in progress** — expanded 588-query chunk-ID bench (`bench-queries-v2.json`),
-  top-1 stock baseline 90.82 %, target 95 %.
-- Plan: [`docs/superpowers/plans/2026-04-24-arista-mcp-retrieval-quality-v0.3-revised.md`](docs/superpowers/plans/2026-04-24-arista-mcp-retrieval-quality-v0.3-revised.md).
+- **v0.3.1** shipped — first release from the multi-RID pipeline
+  (6 RID single-file binaries + multi-arch container on GHCR +
+  cosign keyless + corpus dump carry-forward). Retrieval baseline
+  on the 570-query v2 fixture: **top-1 93.86 % / top-10 100 % /
+  p50 3.4 s / p95 4.5 s** on CPU with the `bge-reranker-v2-m3` INT8
+  reranker (see `plan v0.3-revised` in the docs).
+- v0.3.0 shipped the install-readiness infrastructure (`bootstrap`
+  verb, `scripts/install.sh`, Claude Code marketplace, Quadlet
+  templates). See [CHANGELOG.md](CHANGELOG.md) for the full list.
 - See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 ## License
