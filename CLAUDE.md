@@ -20,7 +20,7 @@ Core has no reference to Data, Embedding, or Server. Tests may reference any lay
 
 ## Version pins (as of Sprint 1)
 
-- **.NET 10** SDK 10.0.201 / TFM `net10.0`.
+- **.NET 10** SDK 10.0.301 / TFM `net10.0`.
 - **EF Core 9.0.15** + **Npgsql.EntityFrameworkCore.PostgreSQL 9.0.4** — held back because
   `Pgvector.EntityFrameworkCore` (0.3.0, the only release) pins Npgsql.EFCore 9.0.1. Bump
   when Pgvector.EFCore ships an EF Core 10 build.
