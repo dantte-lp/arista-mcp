@@ -216,9 +216,11 @@ $BOLD${GREEN}$APP $TAG installed.$RESET
 
 Quick check:
 
-  $APP get-status || true   # not an actual verb; use tools/list via a client
   /usr/local/bin/$APP --version
   jq '.mcpServers["$APP"]' ~/.claude.json
   codex mcp list | grep $APP
+  # From inside Claude Code / Codex: call the get_status MCP tool.
+  # From a shell: curl the HTTP transport if you started it with --transport http:
+  #   curl -fsS http://127.0.0.1:8080/v1/healthz
 
 EOF

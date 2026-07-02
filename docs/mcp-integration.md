@@ -17,7 +17,13 @@ arista-mcp ships two transports from the same code path:
 | Transport | Client | Command |
 |-----------|--------|---------|
 | `stdio`   | Claude Desktop, Claude Code, any MCP client that spawns a subprocess | `arista-mcp serve --transport stdio` |
-| `http`    | HTTP-native clients, local browsers, `curl`, Inspector | `arista-mcp serve --transport http --port 8080` |
+| `http`    | HTTP-native clients, local browsers, `curl`, Inspector | `arista-mcp serve --transport http --bind 0.0.0.0 --port 8080` |
+
+The HTTP host listens on `127.0.0.1` by default. Pass `--bind 0.0.0.0`
+(or set `ARISTA_MCP__HttpBind`) to expose it on all interfaces — do this
+behind a reverse proxy that adds TLS + auth. A liveness endpoint is
+mounted at `GET /v1/healthz` and returns `{"status":"ok"}` when the
+embedder, reranker, and Postgres pool are all reachable.
 
 Both use the same DI surface (`ServerHosting.AddAristaMcpServices`), so
 tools, embedder, reranker, and retriever behave identically. HTTP is
@@ -63,15 +69,17 @@ appears under the 🔧 menu.
 
 ## 3. Claude Code
 
-Claude Code reads `~/.claude/mcp_servers.json` (or the per-project
-`.claude/mcp_servers.json`). Same payload shape as Desktop:
+Claude Code writes MCP server registrations into `~/.claude.json`
+(per-user) under the `mcpServers` key — the same shape as Desktop:
 
 ```bash
-claude mcp add arista \
-  -- dotnet run --project C:/SHARE/arista-mcp/src/AristaMcp.Cli --no-build -- serve --transport stdio
+claude mcp add arista-mcp \
+  -- /usr/local/bin/arista-mcp serve --transport stdio
 ```
 
-Or edit the config file directly. Restart Claude Code after changes.
+`scripts/install.sh` performs the equivalent `jq` insertion into
+`~/.claude.json` automatically. If you edit the file directly, restart
+Claude Code so the new server is picked up.
 
 ## 4. Raw HTTP (curl / Inspector)
 
@@ -113,38 +121,39 @@ Hybrid dense + sparse + rerank retrieval over the catalog.
   "name": "search_docs",
   "arguments": {
     "query": "MLAG peer-link setup",
-    "limit": 5,            // default 10, cap 50
-    "category": "manual",  // optional; filter by catalog category
+    "topK": 5,             // default 10, clamp 1-50
+    "category": "manual",  // optional; one of manual, reference, toi
     "product": "eos",      // optional; exact match on ChunkResult.Product
-    "dedup_per_section": true  // optional; default false
+    "withDiagnostics": false // optional; adds per-stage timings when true
   }
 }
 ```
 
-Typical response:
+Typical response (snake_case fields; matches `SearchDocsTool.cs`):
 
 ```jsonc
 {
   "results": [
     {
-      "doc_id": "a1b2c3d4e5f6",
-      "doc_title": "Arista EOS User Manual",
-      "doc_slug": "EOS-User-Manual",
+      "chunk_id": 12345,
+      "document_id": "a1b2c3d4e5f6",
+      "document_title": "Arista EOS User Manual",
+      "document_slug": "EOS-User-Manual",
       "category": "manual",
       "product": "eos",
       "version": "4.36.0F",
       "section_title": "MLAG Configuration",
       "page_start": 342,
       "page_end": 347,
-      "content": "MLAG (Multi-chassis Link Aggregation) pairs two leaves …",
-      "score": 0.87,
-      "dense_similarity": 0.81,
-      "bm25_score": 14.3,
-      "rerank_score": 0.87
+      "score": 9.81,
+      "content": "MLAG (Multi-chassis Link Aggregation) pairs two leaves …"
     }
   ]
 }
 ```
+
+`score` is the reranker's logit (higher = better). Per-stage similarity
+components are surfaced only when `withDiagnostics=true`.
 
 ### `lookup_section`
 
@@ -272,10 +281,17 @@ and `models/reranker/`.
 
 ### "results are empty"
 
-First, confirm the catalog actually ingested:
+First, confirm the catalog actually ingested. There is no
+`arista-mcp get-status` CLI verb — status is only available via the
+`get_status` MCP tool. From a running MCP client:
+
+```
+/mcp arista-mcp get_status
+```
+
+Or straight against Postgres:
 
 ```bash
-arista-mcp get-status   # via MCP, or:
 podman exec arista-mcp-postgres psql -U arista -d arista -c "SELECT COUNT(*) FROM chunks;"
 ```
 

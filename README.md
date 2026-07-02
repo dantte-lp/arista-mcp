@@ -219,6 +219,22 @@ Russian translation: **[`docs/ru/`](docs/ru/)**.
 Historical / operational notes: [`docs/mcp-integration.md`](docs/mcp-integration.md),
 [`docs/onnx-provider.md`](docs/onnx-provider.md), [`docs/otel.md`](docs/otel.md).
 
+## Release artefacts
+
+Every tag (`vX.Y.Z`) attaches this matrix to the GitHub release page:
+
+| Artefact | RIDs | Description |
+|---|---|---|
+| `arista-mcp-vX.Y.Z-<rid>.tar.gz` + `.sha256` | `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64` | Self-contained binary + `plugin/` + `scripts/` |
+| `arista-mcp-vX.Y.Z-<rid>.zip` + `.sha256` | `win-x64`, `win-arm64` | Same payload, Windows-shape |
+| `arista-corpus-vX.Y.Z.dump` + `.sha256` | — | `pg_restore --format=custom` binary dump |
+| `ghcr.io/dantte-lp/arista-mcp:vX.Y.Z` | `linux/amd64`, `linux/arm64` | Cosign keyless-OIDC signed multi-arch image |
+
+The corpus dump is version-independent unless the ingest pipeline
+changes; `bootstrap` automatically resolves the newest dump for the
+requested tag (with a fallback to the prior corpus tag) if the release
+did not re-run ingest.
+
 ## Current status
 
 - **v0.3.1** shipped — first release from the multi-RID pipeline
