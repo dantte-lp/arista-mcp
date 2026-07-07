@@ -28,16 +28,24 @@ END $$;
 
 -- create_text_analyzer lives in tokenizer_catalog. Must be called qualified because
 -- ALTER DATABASE SET search_path only affects future sessions, not this script.
-SELECT tokenizer_catalog.create_text_analyzer('english_analyzer', $$
-    pre_tokenizer = "unicode_segmentation"
-    [[character_filters]]
-    to_lowercase = {}
-    [[character_filters]]
-    unicode_normalization = "nfkd"
-    [[token_filters]]
-    skip_non_alphanumeric = {}
-    [[token_filters]]
-    stopwords = "nltk_english"
-    [[token_filters]]
-    stemmer = "english_porter2"
-$$);
+-- Idempotent: create the analyzer only if absent, so re-running init.sql on an
+-- existing container (the bootstrap flow reuses containers) does not error on a
+-- duplicate analyzer.
+DO $do$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM tokenizer_catalog.text_analyzer WHERE name = 'english_analyzer') THEN
+        PERFORM tokenizer_catalog.create_text_analyzer('english_analyzer', $$
+            pre_tokenizer = "unicode_segmentation"
+            [[character_filters]]
+            to_lowercase = {}
+            [[character_filters]]
+            unicode_normalization = "nfkd"
+            [[token_filters]]
+            skip_non_alphanumeric = {}
+            [[token_filters]]
+            stopwords = "nltk_english"
+            [[token_filters]]
+            stemmer = "english_porter2"
+        $$);
+    END IF;
+END $do$;

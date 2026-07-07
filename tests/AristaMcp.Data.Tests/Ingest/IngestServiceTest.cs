@@ -23,7 +23,7 @@ public class IngestServiceTest(PgvectorFixture fx)
         var docRepo = new DocumentRepository(ctx, TimeProvider.System);
         var chunkRepo = new ChunkRepository(pg.DataSource, ctx);
         var runRepo = new IngestRunRepository(ctx, TimeProvider.System);
-        return new IngestService(chunker, embedder, docRepo, chunkRepo, runRepo);
+        return new IngestService(chunker, embedder, docRepo, chunkRepo, runRepo, ctx);
     }
 
     [Fact]

@@ -17,7 +17,41 @@ public sealed class ChunkRepository(NpgsqlDataSource dataSource, AristaDbContext
             return 0;
         }
 
-        await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        // When the caller has an ambient EF transaction open (per-document ingest
+        // wraps doc-upsert + delete + parent/leaf COPYs in one unit), the COPY must
+        // run on that same connection so it commits or rolls back atomically with
+        // the rest of the document. Npgsql binds COPY to the connection's active
+        // transaction automatically. Otherwise (standalone bulk insert), open a
+        // dedicated connection from the data source.
+        var ambient = db.Database.CurrentTransaction;
+        NpgsqlConnection conn;
+        NpgsqlConnection? owned = null;
+        if (ambient is not null)
+        {
+            conn = (NpgsqlConnection)db.Database.GetDbConnection();
+        }
+        else
+        {
+            owned = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+            conn = owned;
+        }
+
+        try
+        {
+            return await CopyRowsAsync(conn, chunks, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (owned is not null)
+            {
+                await owned.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static async Task<int> CopyRowsAsync(
+        NpgsqlConnection conn, IReadOnlyList<AristaChunk> chunks, CancellationToken ct)
+    {
         await using var writer = await conn.BeginBinaryImportAsync(
             "COPY chunks (document_id, chunk_index, content, raw_content, "
             + "section_title, section_level, page_start, page_end, token_count, "

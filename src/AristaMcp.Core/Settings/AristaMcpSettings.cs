@@ -47,4 +47,58 @@ public sealed class AristaMcpSettings
     // Sprint 16: listwise re-rank of the cross-encoder's top-5 via a
     // local llama.cpp-served instruction-tuned model.
     public ListwiseRerankSettings ListwiseRerank { get; set; } = new();
+
+    // Fails fast on nonsensical configuration before any model load or DB
+    // connection. Without this a typo silently degrades behaviour — most
+    // insidiously EmbeddingVariant, where an unrecognised value used to fall
+    // straight through to the fp32 model path with no warning.
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(ConnectionString))
+        {
+            throw new InvalidOperationException("ConnectionString must not be empty.");
+        }
+
+        if (HttpPort is < 1 or > 65535)
+        {
+            throw new InvalidOperationException(
+                $"HttpPort must be in 1..65535; got {HttpPort}.");
+        }
+
+        if (!string.Equals(EmbeddingVariant, "fp32", StringComparison.Ordinal)
+            && !string.Equals(EmbeddingVariant, "fp16", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"EmbeddingVariant must be 'fp32' or 'fp16'; got '{EmbeddingVariant}'.");
+        }
+
+        if (EmbeddingDim <= 0)
+        {
+            throw new InvalidOperationException($"EmbeddingDim must be positive; got {EmbeddingDim}.");
+        }
+
+        if (IngestBatchSize <= 0)
+        {
+            throw new InvalidOperationException($"IngestBatchSize must be positive; got {IngestBatchSize}.");
+        }
+
+        if (ChunkMinTokens <= 0 || ChunkTargetTokens <= 0 || ChunkMaxTokens <= 0)
+        {
+            throw new InvalidOperationException(
+                "ChunkMinTokens, ChunkTargetTokens and ChunkMaxTokens must all be positive.");
+        }
+
+        if (ChunkOverlapTokens < 0)
+        {
+            throw new InvalidOperationException(
+                $"ChunkOverlapTokens must not be negative; got {ChunkOverlapTokens}.");
+        }
+
+        if (!(ChunkMinTokens <= ChunkTargetTokens && ChunkTargetTokens <= ChunkMaxTokens))
+        {
+            throw new InvalidOperationException(
+                "Chunk token bounds must satisfy ChunkMinTokens <= ChunkTargetTokens <= ChunkMaxTokens; got "
+                + $"{ChunkMinTokens} / {ChunkTargetTokens} / {ChunkMaxTokens}.");
+        }
+    }
 }

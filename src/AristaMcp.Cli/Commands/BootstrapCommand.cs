@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
+using System.Security.Cryptography;
 using Spectre.Console;
 
 namespace AristaMcp.Cli.Commands;
@@ -331,6 +332,7 @@ public static class BootstrapCommand
         try
         {
             await DownloadFileAsync(url, tmpHostPath, console, ct).ConfigureAwait(false);
+            await VerifyChecksumAsync(url, tmpHostPath, console, ct).ConfigureAwait(false);
 
             // Copy into the container.
             await RunStreamingAsync(runtime, $"cp \"{tmpHostPath}\" \"{args.ContainerName}:/tmp/arista-corpus.dump\"",
@@ -346,11 +348,22 @@ public static class BootstrapCommand
                 "--no-owner --no-acl --clean --if-exists -j 4",
                 "/tmp/arista-corpus.dump");
 #pragma warning restore S2068
-            int code = await RunStreamingAsync(runtime, restoreArgs, console, ct).ConfigureAwait(false);
+            (int code, string restoreStderr) =
+                await RunStreamingCaptureStderrAsync(runtime, restoreArgs, console, ct).ConfigureAwait(false);
+            if (code != 0 && !LooksLikeHnswSharedMemExhaustion(restoreStderr))
+            {
+                // A non-zero exit that is NOT the recoverable HNSW /dev/shm case
+                // means the dump genuinely failed to restore. Surface it instead
+                // of silently proceeding into a serial index rebuild against a
+                // half-restored schema.
+                console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
+                    $"[red]error[/] pg_restore failed (exit {code}); see stderr above.");
+                return code;
+            }
             if (code != 0)
             {
                 console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
-                    $"[yellow]warn[/] pg_restore exit {code} — typical for HNSW shared-mem ENOSPC; retrying serially");
+                    $"[yellow]warn[/] pg_restore exit {code} — HNSW shared-mem ENOSPC; retrying index build serially");
                 // Drop+recreate the HNSW index serially with no parallel
                 // workers (avoids /dev/shm exhaustion on small containers).
                 string hnswSql = "SET maintenance_work_mem = '4GB'; SET max_parallel_maintenance_workers = 0; " +
@@ -579,50 +592,142 @@ public static class BootstrapCommand
         resp.EnsureSuccessStatusCode();
         long? total = resp.Content.Headers.ContentLength;
         await using var input = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        await using var output = File.Create(destination);
+
+        // Download to a sibling `.part` file and only File.Move it into place once
+        // the body is fully and correctly received. A crash or truncated transfer
+        // then never leaves a half-written dump at the real path where a later
+        // pg_restore would blindly consume it.
+        string partPath = destination + ".part";
         var buf = new byte[256 * 1024];
         long copied = 0;
         long lastReport = 0;
         int n;
-        while (true)
+        try
         {
-            // Bound each read by an idle timeout: a stalled body (no bytes for AssetIdleTimeout)
-            // throws instead of hanging until the 30-minute HttpClient.Timeout or Ctrl+C.
-            using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            idle.CancelAfter(AssetIdleTimeout);
-            try
+            await using (var output = File.Create(partPath))
             {
-                n = await input.ReadAsync(buf, idle.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                throw new TimeoutException(
-                    $"download stalled: no data received for {AssetIdleTimeout.TotalSeconds:F0}s");
+                while (true)
+                {
+                    // Bound each read by an idle timeout: a stalled body (no bytes for AssetIdleTimeout)
+                    // throws instead of hanging until the 30-minute HttpClient.Timeout or Ctrl+C.
+                    using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    idle.CancelAfter(AssetIdleTimeout);
+                    try
+                    {
+                        n = await input.ReadAsync(buf, idle.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        throw new TimeoutException(
+                            $"download stalled: no data received for {AssetIdleTimeout.TotalSeconds:F0}s");
+                    }
+
+                    if (n <= 0)
+                    {
+                        break;
+                    }
+
+                    await output.WriteAsync(buf.AsMemory(0, n), ct).ConfigureAwait(false);
+                    copied += n;
+                    if (copied - lastReport > 50 * 1024 * 1024 || (total.HasValue && copied == total))
+                    {
+                        lastReport = copied;
+                        if (total.HasValue)
+                        {
+                            double pct = copied * 100.0 / total.Value;
+                            console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
+                                $"           {copied / 1024 / 1024} / {total / 1024 / 1024} MB ({pct:F1}%)");
+                        }
+                        else
+                        {
+                            console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
+                                $"           {copied / 1024 / 1024} MB");
+                        }
+                    }
+                }
             }
 
-            if (n <= 0)
+            // A Content-Length mismatch means the transfer was truncated (proxy
+            // reset, disk full, connection dropped after the header). Fail rather
+            // than hand a short file to pg_restore, which would report a confusing
+            // "unexpected end of file" much later.
+            if (total.HasValue && copied != total.Value)
             {
-                break;
+                throw new IOException(
+                    $"download truncated: got {copied} bytes, expected {total.Value} (Content-Length) from {url}");
             }
 
-            await output.WriteAsync(buf.AsMemory(0, n), ct).ConfigureAwait(false);
-            copied += n;
-            if (copied - lastReport > 50 * 1024 * 1024 || (total.HasValue && copied == total))
-            {
-                lastReport = copied;
-                if (total.HasValue)
-                {
-                    double pct = copied * 100.0 / total.Value;
-                    console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
-                        $"           {copied / 1024 / 1024} / {total / 1024 / 1024} MB ({pct:F1}%)");
-                }
-                else
-                {
-                    console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
-                        $"           {copied / 1024 / 1024} MB");
-                }
-            }
+            File.Move(partPath, destination, overwrite: true);
         }
+        catch
+        {
+            if (File.Exists(partPath))
+            {
+                try { File.Delete(partPath); }
+                catch (IOException) { /* best-effort cleanup */ }
+                catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+            }
+            throw;
+        }
+    }
+
+    // Fetches `<url>.sha256` (published alongside every corpus dump by the
+    // release pipeline) and verifies the on-disk file against it before the
+    // dump is handed to pg_restore. A mismatch aborts loudly; a missing
+    // checksum asset (older manual uploads that predate the pipeline) degrades
+    // to a loud warning rather than a hard failure, since the dump itself
+    // arrived over TLS from the release host.
+    private static async Task VerifyChecksumAsync(
+        string url, string filePath, IAnsiConsole console, CancellationToken ct)
+    {
+        string shaUrl = url + ".sha256";
+        if (!Uri.TryCreate(shaUrl, UriKind.Absolute, out var shaUri)
+            || !string.Equals(shaUri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"refusing to fetch checksum from non-https URL: {shaUrl}");
+        }
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd(
+            $"arista-mcp/{Assembly.GetExecutingAssembly().GetName().Version}");
+
+        string expected;
+        using (var resp = await http.GetAsync(shaUri, ct).ConfigureAwait(false))
+        {
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
+                    $"[yellow]warn[/] no checksum asset at {shaUrl}; skipping SHA-256 verification");
+                return;
+            }
+            resp.EnsureSuccessStatusCode();
+            string body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            // sha256sum format is "<hex>  <filename>"; take the first token.
+            expected = body.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries) is { Length: > 0 } parts
+                ? parts[0].Trim().ToLowerInvariant()
+                : string.Empty;
+        }
+
+        if (expected.Length != 64)
+        {
+            throw new InvalidOperationException(
+                $"malformed checksum asset at {shaUrl}: expected a 64-char SHA-256 hex digest");
+        }
+
+        string actual;
+        await using (var stream = File.OpenRead(filePath))
+        {
+            byte[] hash = await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false);
+            actual = Convert.ToHexStringLower(hash);
+        }
+
+        if (!string.Equals(actual, expected, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"corpus checksum mismatch: expected {expected}, computed {actual} for {filePath}");
+        }
+
+        console.MarkupLine("  corpus   [green]checksum verified[/]");
     }
 
     private static async Task<int> RunSilentAsync(string file, string args, CancellationToken ct)
@@ -749,5 +854,73 @@ public static class BootstrapCommand
             throw;
         }
         return p.ExitCode;
+    }
+
+    // Streams stdout/stderr to the console like RunStreamingAsync, but also
+    // returns the accumulated stderr so the caller can distinguish an expected,
+    // recoverable failure (e.g. HNSW index build hitting /dev/shm ENOSPC) from
+    // any other pg_restore error that must surface loudly.
+    private static async Task<(int ExitCode, string Stderr)> RunStreamingCaptureStderrAsync(
+        string file, string args, IAnsiConsole console, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo(file, args)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        using var p = Process.Start(psi)
+            ?? throw new InvalidOperationException($"failed to launch {file}");
+        var stderr = new System.Text.StringBuilder();
+        p.OutputDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrEmpty(e.Data))
+            {
+                console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
+                    $"           {Markup.Escape(e.Data)}");
+            }
+        };
+        p.ErrorDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrEmpty(e.Data))
+            {
+                lock (stderr)
+                {
+                    stderr.AppendLine(e.Data);
+                }
+                console.MarkupLineInterpolated(CultureInfo.InvariantCulture,
+                    $"           [yellow]{Markup.Escape(e.Data)}[/]");
+            }
+        };
+        p.BeginOutputReadLine();
+        p.BeginErrorReadLine();
+        try
+        {
+            await p.WaitForExitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            try { p.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { /* already exited */ }
+            throw;
+        }
+        string captured;
+        lock (stderr)
+        {
+            captured = stderr.ToString();
+        }
+        return (p.ExitCode, captured);
+    }
+
+    // Signatures pgvector / Postgres emit when the parallel HNSW index build
+    // exhausts shared memory (/dev/shm) — the one pg_restore failure the
+    // bootstrap can recover from by rebuilding the index serially. Any other
+    // restore error is a real problem and must not be masked by the rebuild.
+    private static bool LooksLikeHnswSharedMemExhaustion(string stderr)
+    {
+        return stderr.Contains("No space left on device", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("could not resize shared memory", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("shared memory segment", StringComparison.OrdinalIgnoreCase);
     }
 }
