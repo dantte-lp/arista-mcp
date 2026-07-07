@@ -118,7 +118,7 @@ public sealed class HybridRetriever : IHybridRetriever
             .Select(qv => RunDenseAsync(qv, options, ct))
             .ToArray();
         var sparseTask = RunSparseAsync(expansion.Expanded, options, ct);
-        await Task.WhenAll([..denseTasks, sparseTask]).ConfigureAwait(false);
+        await Task.WhenAll([.. denseTasks, sparseTask]).ConfigureAwait(false);
 
         var denseResults = denseTasks.Select(t => t.Result).ToArray();
         var denseRows = denseResults.Length == 1
