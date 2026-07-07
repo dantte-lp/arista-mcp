@@ -109,9 +109,9 @@ jobs:
       TAG_NAME: ${{ needs.validate-tag.outputs.tag }}
       RID: ${{ matrix.rid }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           global-json-file: global.json
 
@@ -206,7 +206,7 @@ jobs:
       TAG_NAME: ${{ needs.validate-tag.outputs.tag }}
       VERSION: ${{ needs.validate-tag.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Skip if Containerfile missing
         id: precheck
@@ -292,7 +292,7 @@ jobs:
       TAG_NAME: ${{ needs.validate-tag.outputs.tag }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Bring-forward last release's corpus dump
         shell: bash
@@ -370,7 +370,7 @@ jobs:
       VERSION: ${{ needs.validate-tag.outputs.version }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Extract release notes
         shell: bash
