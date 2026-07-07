@@ -24,7 +24,7 @@ namespace AristaMcp.Cli.Commands;
 // model fetch (handled by `scripts/fetch-models.ps1`).
 public static class BootstrapCommand
 {
-    private const string DefaultPgImage = "docker.io/tensorchord/vchord-suite:pg18-latest";
+    private const string DefaultPgImage = "docker.io/tensorchord/vchord-suite:pg18-latest@sha256:c6e5e77a1180199f91b040b6e85c6d10b0ded6d49fb614dfd2e7272ffb91af08";
     private const string DefaultContainerName = "arista-mcp-postgres";
     private const string DefaultDatabase = "arista";
     private const string DefaultUser = "arista";
