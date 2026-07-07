@@ -86,12 +86,50 @@ jobs:
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
   # ──────────────────────────────────────────────────────────────────
+  # Create the GitHub Release exactly once, before any artefact job runs.
+  #
+  # Previously each of the 6 publish matrix jobs called
+  # softprops/action-gh-release with the same tag concurrently; whichever
+  # two hit the "create release" path at the same instant raced (duplicate
+  # POST → one job 422s, or a duplicate/empty release is left behind).
+  # Creating the release up front here makes every downstream job a pure
+  # asset upload against an already-existing release — no create race.
+  # ──────────────────────────────────────────────────────────────────
+  create-release:
+    name: create release
+    needs: [ci-mirror, validate-tag]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG_NAME: ${{ needs.validate-tag.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Create release if absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          if gh release view "$TAG_NAME" -R "$repo" >/dev/null 2>&1; then
+            echo "release $TAG_NAME already exists — reusing."
+            exit 0
+          fi
+          prerelease_flag=""
+          case "$TAG_NAME" in *-*) prerelease_flag="--prerelease" ;; esac
+          gh release create "$TAG_NAME" -R "$repo" \
+            --title "$TAG_NAME" \
+            --notes "Release $TAG_NAME (notes finalized after build)." \
+            $prerelease_flag
+
+  # ──────────────────────────────────────────────────────────────────
   # GATE 2 — single-file binaries for 6 RIDs. Per-archive SHA-256.
   # Uploads to the GitHub Release.
   # ──────────────────────────────────────────────────────────────────
   publish:
     name: publish ${{ matrix.rid }}
-    needs: [ci-mirror, validate-tag]
+    needs: [ci-mirror, validate-tag, create-release]
     permissions:
       contents: write
     strategy:
