@@ -30,7 +30,7 @@ public sealed class XlmRobertaOnnxReranker : IReranker
 
         _tok = new XlmRobertaRerankerTokenizer(opt.VocabPath);
 
-        var so = new SessionOptions
+        using var so = new SessionOptions
         {
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             IntraOpNumThreads = Environment.ProcessorCount,

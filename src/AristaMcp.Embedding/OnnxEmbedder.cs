@@ -29,7 +29,7 @@ public sealed class OnnxEmbedder : IEmbedder
         _opt = opt;
         _tok = new BertWordPieceTokenizer(opt.VocabPath);
 
-        var so = new SessionOptions
+        using var so = new SessionOptions
         {
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             IntraOpNumThreads = Environment.ProcessorCount,
