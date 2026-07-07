@@ -38,6 +38,11 @@ public static class BootstrapCommand
 #pragma warning restore S2068
     private const int DefaultHostPort = 5434;
 
+    // With HttpCompletionOption.ResponseHeadersRead, HttpClient.Timeout covers only the header
+    // exchange — the body copy is unbounded. Guard the body with an idle timeout instead: a stalled
+    // connection (headers received, then no bytes) fails fast rather than hanging until Ctrl+C.
+    private static readonly TimeSpan AssetIdleTimeout = TimeSpan.FromSeconds(100);
+
     // Release-attachment URL pattern. The placeholder is the full tag
     // (with the leading `v`) — both the manual v0.3.0 corpus upload
     // and the release.yml `corpus-dump` bring-forward job name the
@@ -579,8 +584,27 @@ public static class BootstrapCommand
         long copied = 0;
         long lastReport = 0;
         int n;
-        while ((n = await input.ReadAsync(buf, ct).ConfigureAwait(false)) > 0)
+        while (true)
         {
+            // Bound each read by an idle timeout: a stalled body (no bytes for AssetIdleTimeout)
+            // throws instead of hanging until the 30-minute HttpClient.Timeout or Ctrl+C.
+            using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            idle.CancelAfter(AssetIdleTimeout);
+            try
+            {
+                n = await input.ReadAsync(buf, idle.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"download stalled: no data received for {AssetIdleTimeout.TotalSeconds:F0}s");
+            }
+
+            if (n <= 0)
+            {
+                break;
+            }
+
             await output.WriteAsync(buf.AsMemory(0, n), ct).ConfigureAwait(false);
             copied += n;
             if (copied - lastReport > 50 * 1024 * 1024 || (total.HasValue && copied == total))
