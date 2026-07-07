@@ -26,6 +26,8 @@ public static class CliConfiguration
         builder.AddEnvironmentVariables(EnvPrefix);
 
         var root = builder.Build();
-        return root.Get<AristaMcpSettings>() ?? new AristaMcpSettings();
+        var settings = root.Get<AristaMcpSettings>() ?? new AristaMcpSettings();
+        settings.Validate();
+        return settings;
     }
 }
