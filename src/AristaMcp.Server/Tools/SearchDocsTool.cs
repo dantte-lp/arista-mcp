@@ -18,6 +18,14 @@ public sealed class SearchDocsTool(IHybridRetriever retriever)
         [Description("Drop duplicate chunks from the same document+section, keeping only the top-scoring.")] bool dedupPerSection = false,
         CancellationToken ct = default)
     {
+        // Cap free-text input before it is embedded (ONNX) and BM25-tokenized every call — an
+        // arbitrarily long query is a cheap CPU-amplification vector.
+        const int MaxQueryChars = 4000;
+        if (query.Length > MaxQueryChars)
+        {
+            return new { results = System.Array.Empty<object>(), warning = $"query exceeds {MaxQueryChars} characters; refine it" };
+        }
+
         var limit = Math.Clamp(topK, 1, 50);
         var opts = new RetrievalOptions
         {
