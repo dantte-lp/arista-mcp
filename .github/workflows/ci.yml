@@ -40,6 +40,9 @@ jobs:
       - name: Build (Release)
         run: dotnet build --no-restore -c Release
 
+      - name: Format check
+        run: dotnet format arista-mcp.slnx --verify-no-changes --no-restore
+
       # Unit tests only — integration tests that hit PostgreSQL run in e2e.yml
       # with a service container. SkippableFact tests skip cleanly when their
       # external resource (models, DB) is absent so we don't need to filter.
@@ -57,3 +60,72 @@ jobs:
           name: test-results
           path: TestResults
           retention-days: 14
+
+  semgrep:
+    runs-on: ubuntu-latest
+    container: { image: semgrep/semgrep }
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - run: semgrep scan --config=auto --error src/ --exclude 'obj' --exclude 'bin' --exclude '*.Designer.cs'
+
+  # PVS-Studio C# analysis via pvs-studio-dotnet (Linux). Licensed with the PVS_USER/PVS_KEY repo
+  # secrets; the job self-skips when they are absent (forks, PRs from forks, or before the secrets
+  # are configured) so the workflow stays green. Findings are informational (uploaded as artifacts),
+  # matching the sibling nutanix-mcp setup. A local Windows run is available via
+  # scripts/pvs-studio-scan.ps1.
+  pvs-studio:
+    name: pvs-studio (C#)
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with: { global-json-file: global.json }
+      - name: Skip if license missing
+        id: precheck
+        env:
+          PVS_USER: ${{ secrets.PVS_USER }}
+          PVS_KEY: ${{ secrets.PVS_KEY }}
+        run: |
+          if [ -z "$PVS_USER" ] || [ -z "$PVS_KEY" ]; then
+            echo "PVS-Studio license secrets not set — skipping job."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install PVS-Studio
+        if: steps.precheck.outputs.skip != 'true'
+        run: |
+          wget -q -O- https://files.pvs-studio.com/etc/pubkey.txt | sudo apt-key add -
+          sudo wget -q -O /etc/apt/sources.list.d/viva64.list https://files.pvs-studio.com/etc/viva64.list
+          sudo apt-get update
+          sudo apt-get install -y pvs-studio-dotnet
+      - name: Configure license
+        if: steps.precheck.outputs.skip != 'true'
+        env:
+          PVS_USER: ${{ secrets.PVS_USER }}
+          PVS_KEY: ${{ secrets.PVS_KEY }}
+        run: pvs-studio-dotnet credentials -u "$PVS_USER" -n "$PVS_KEY"
+      - name: Build
+        if: steps.precheck.outputs.skip != 'true'
+        run: dotnet build arista-mcp.slnx --configuration Release
+      - name: Analyze each project
+        if: steps.precheck.outputs.skip != 'true'
+        run: |
+          set -e
+          mkdir -p pvs-out
+          for proj in src/AristaMcp.*/AristaMcp.*.csproj; do
+            name=$(basename "$proj" .csproj)
+            pvs-studio-dotnet -t "$proj" -c Release -o "pvs-out/${name}.plog" || code=$?
+            # Bit-mask: 256 = findings, 1024 = license expiring soon — both tolerated.
+            if [ -n "${code:-}" ] && [ $((code & ~256 & ~1024)) -ne 0 ]; then
+              exit "$code"
+            fi
+            unset code
+          done
+      - name: Upload plog artifacts
+        if: steps.precheck.outputs.skip != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pvs-studio-plogs
+          path: pvs-out/
