@@ -40,7 +40,7 @@ jobs:
       PGDATABASE: arista
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Start Postgres (vchord-suite pg18) with shared_preload_libraries
         run: |
@@ -56,7 +56,7 @@ jobs:
             --health-interval 10s \
             --health-timeout 5s \
             --health-retries 15 \
-            tensorchord/vchord-suite:pg18-latest \
+            tensorchord/vchord-suite:pg18-latest@sha256:c6e5e77a1180199f91b040b6e85c6d10b0ded6d49fb614dfd2e7272ffb91af08 \
             postgres \
               -c shared_preload_libraries=vector,vchord,vchord_bm25,pg_tokenizer \
               -c shared_buffers=512MB \
@@ -75,12 +75,12 @@ jobs:
           exit 1
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           global-json-file: global.json
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Packages.props') }}
@@ -94,7 +94,7 @@ jobs:
 
       - name: Cache embedder model
         id: embedder-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: models/embedder
           key: embedder-snowflake-arctic-embed-m-v1.5
@@ -133,7 +133,7 @@ jobs:
 
       - name: Upload test logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-logs-${{ github.run_id }}
           path: |

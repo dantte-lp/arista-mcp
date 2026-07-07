@@ -57,6 +57,7 @@ public static partial class DocumentLoader
             throw new FileNotFoundException($"MD file missing for doc {entry.Id}", mdFull);
         }
 
+        // nosemgrep: csharp.lang.security.filesystem.unsafe-path-combine.unsafe-path-combine -- catalogBaseDir is a trusted CLI/config path and entry.MdPath comes from the scraper-produced catalog, not from external/user input.
         var md = await File.ReadAllTextAsync(mdFull, ct).ConfigureAwait(false);
 
         var jsonFull = Path.Combine(catalogBaseDir, NormalizePath(entry.JsonPath));

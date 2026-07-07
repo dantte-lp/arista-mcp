@@ -6,7 +6,7 @@ After=network-online.target
 
 [Container]
 ContainerName=arista-mcp-postgres
-Image=docker.io/tensorchord/vchord-suite:pg18-latest
+Image=docker.io/tensorchord/vchord-suite:pg18-latest@sha256:c6e5e77a1180199f91b040b6e85c6d10b0ded6d49fb614dfd2e7272ffb91af08
 
 # Mount data on a named volume, declared in the sibling .volume file.
 # pg18 images (tensorchord/vchord-suite, docker-library/postgres) place data
