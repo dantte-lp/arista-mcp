@@ -129,7 +129,8 @@ public static class IngestCommand
             embedder,
             new DocumentRepository(ctx, TimeProvider.System),
             new ChunkRepository(dataSource, ctx),
-            new IngestRunRepository(ctx, TimeProvider.System));
+            new IngestRunRepository(ctx, TimeProvider.System),
+            ctx);
 
         var progress = new SpectreIngestProgress(console, opts.Verbose);
         var result = await service.IngestAsync(opts, progress, ct).ConfigureAwait(false);

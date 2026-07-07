@@ -2,8 +2,10 @@ using AristaMcp.Core.Catalog;
 using AristaMcp.Core.Chunking;
 using AristaMcp.Core.Models;
 using AristaMcp.Core.Observability;
+using AristaMcp.Data;
 using AristaMcp.Data.Repositories;
 using AristaMcp.Embedding;
+using Microsoft.EntityFrameworkCore;
 
 namespace AristaMcp.Cli.Ingest;
 
@@ -18,7 +20,8 @@ public sealed class IngestService(
     IEmbedder embedder,
     IDocumentRepository docRepo,
     IChunkRepository chunkRepo,
-    IIngestRunRepository runRepo)
+    IIngestRunRepository runRepo,
+    AristaDbContext db)
 {
     public async Task<IngestResult> IngestAsync(
         IngestOptions options,
@@ -103,7 +106,19 @@ public sealed class IngestService(
                 progress.EndDocument(entry.Id, chunkCount, skipped: false);
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            // Ctrl+C mid-run: the current document's transaction has already rolled
+            // back (see IngestDocumentAsync), but the ingest_runs row is still
+            // 'running'. Finalize it as 'cancelled' so it isn't stuck forever, then
+            // rethrow so the CLI surfaces the cancellation. Use a fresh token — the
+            // ambient one is already cancelled and would abort the write.
+            await runRepo.FinishAsync(
+                run.Id, "cancelled", total, skipped, upserted, chunksUpserted,
+                "ingest cancelled", CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+        catch (Exception ex)
         {
             error = ex.Message;
         }
@@ -178,11 +193,17 @@ public sealed class IngestService(
                 return (totalDrafts, null);
             }
 
-            // doc metadata + chunk wipe happen once. The two-pass insert
-            // below writes parents first (no embedder calls), reads back
-            // their DB ids ordered by chunk_index, patches leaves with
-            // parent_chunk_id, then runs the sub-batched embed +
-            // BulkInsert loop on leaves.
+            // The whole per-document write unit — doc-metadata upsert, chunk
+            // wipe, parent COPY, parent-id readback, and every leaf COPY — runs
+            // inside one explicit transaction on a shared connection. Before this
+            // was atomic, pdf_sha256 was committed by UpsertAsync *before* the
+            // chunks landed, so a mid-document failure left the doc marked
+            // ingested but half- (or un-) chunked, and the incremental-skip logic
+            // then passed over it forever. Committing everything together means
+            // pdf_sha256 only becomes durable once all leaves are in; any failure
+            // rolls the whole document back so the next run retries it cleanly.
+            await using var tx = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+
             await docRepo.UpsertAsync(loaded.Metadata, ct).ConfigureAwait(false);
             await chunkRepo.DeleteByDocumentAsync(entry.Id, ct).ConfigureAwait(false);
 
@@ -282,6 +303,14 @@ public sealed class IngestService(
 
                 subBatchIndex++;
             }
+
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+
+            // Detach every entity tracked by this document's writes. Without this,
+            // the change tracker keeps growing across the ~528-document run and
+            // each SaveChanges pays an O(N²) DetectChanges cost over the whole
+            // accumulated graph.
+            db.ChangeTracker.Clear();
 
             return (inserted, null);
         }
