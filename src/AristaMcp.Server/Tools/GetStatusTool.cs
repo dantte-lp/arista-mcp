@@ -13,13 +13,37 @@ public sealed class GetStatusTool(AristaDbContext db, IIngestRunRepository runRe
     [Description("Health and store stats: document/chunk counts, last ingest run, extension versions.")]
     public async Task<object> GetAsync(CancellationToken ct = default)
     {
-        var docCount = await db.Documents.CountAsync(ct).ConfigureAwait(false);
-        var chunkCount = await db.Chunks.CountAsync(ct).ConfigureAwait(false);
-        var lastRun = await runRepo.GetLastAsync(ct).ConfigureAwait(false);
+        // Derive health from a real probe rather than asserting it. A DB that is
+        // unreachable, or a store with zero documents/chunks, is not healthy —
+        // reporting healthy=true unconditionally hid exactly those failures. On a
+        // connectivity error, report the store as unhealthy instead of throwing so
+        // the client still gets a structured status payload.
+        int docCount;
+        int chunkCount;
+        Data.Entities.IngestRunEntity? lastRun;
+        try
+        {
+            docCount = await db.Documents.CountAsync(ct).ConfigureAwait(false);
+            chunkCount = await db.Chunks.CountAsync(ct).ConfigureAwait(false);
+            lastRun = await runRepo.GetLastAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new
+            {
+                healthy = false,
+                documents = 0,
+                chunks = 0,
+                error = ex.Message,
+                last_run = (object?)null,
+            };
+        }
+
+        var healthy = docCount > 0 && chunkCount > 0;
 
         return new
         {
-            healthy = true,
+            healthy,
             documents = docCount,
             chunks = chunkCount,
             last_run = lastRun is null ? null : new

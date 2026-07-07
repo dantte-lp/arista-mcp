@@ -30,7 +30,7 @@ public sealed class GetDocumentTool(AristaDbContext db)
             .CountAsync(c => c.DocumentId == documentId, ct)
             .ConfigureAwait(false);
 
-        var tags = JsonSerializer.Deserialize<string[]>(doc.TagsJson) ?? [];
+        var tags = ParseTags(doc.TagsJson);
 
         return new
         {
@@ -55,5 +55,26 @@ public sealed class GetDocumentTool(AristaDbContext db)
             converted_at = doc.ConvertedAt,
             ingested_at = doc.IngestedAt,
         };
+    }
+
+    // TagsJson is a plain text column: a legacy or partially-migrated row can hold
+    // SQL NULL, an empty string, or non-array JSON. Deserialize<string[]> throws on
+    // all of those, which would surface as a tool-level failure for an otherwise
+    // valid document. Degrade to an empty tag list instead.
+    private static string[] ParseTags(string? tagsJson)
+    {
+        if (string.IsNullOrEmpty(tagsJson))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(tagsJson) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 }
