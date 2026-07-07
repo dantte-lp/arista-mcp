@@ -17,6 +17,31 @@ namespace AristaMcp.Data.Migrations
             // tokenize(q, 'chunks_tokenizer')::bm25vector).
             migrationBuilder.Sql("ALTER TABLE chunks ADD COLUMN IF NOT EXISTS bm25v bm25vector;");
 
+            // Self-contained: `create_custom_model_tokenizer_and_trigger` below references
+            // `english_analyzer`, which is otherwise created only by docker/init.sql. A plain
+            // `dotnet ef database update` against a fresh DB would fail with "TextAnalyzer not found",
+            // so create it here idempotently (config verbatim from docker/init.sql).
+            migrationBuilder.Sql("""
+                DO $do$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM tokenizer_catalog.text_analyzer WHERE name = 'english_analyzer') THEN
+                        PERFORM tokenizer_catalog.create_text_analyzer('english_analyzer', $cfg$
+                            pre_tokenizer = "unicode_segmentation"
+                            [[character_filters]]
+                            to_lowercase = {}
+                            [[character_filters]]
+                            unicode_normalization = "nfkd"
+                            [[token_filters]]
+                            skip_non_alphanumeric = {}
+                            [[token_filters]]
+                            stopwords = "nltk_english"
+                            [[token_filters]]
+                            stemmer = "english_porter2"
+                        $cfg$);
+                    END IF;
+                END $do$;
+                """);
+
             migrationBuilder.Sql("""
                 SELECT tokenizer_catalog.create_custom_model_tokenizer_and_trigger(
                     tokenizer_name     => 'chunks_tokenizer',
