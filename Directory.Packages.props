@@ -4,8 +4,8 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="ModelContextProtocol" Version="1.4.0" />
-    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="1.4.0" />
+    <PackageVersion Include="ModelContextProtocol" Version="1.4.1" />
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="1.4.1" />
     <PackageVersion Include="Microsoft.Extensions.AI" Version="10.7.0" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.9" />
@@ -30,12 +30,12 @@
          the same revision so the optional `-p:UseGpuOnnx=true` switch (see
          src/AristaMcp.Embedding/AristaMcp.Embedding.csproj) restores a matched pair
          instead of mixing major versions. -->
-    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.27.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.27.1" />
     <PackageVersion Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.27.0" />
     <PackageVersion Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
     <PackageVersion Include="System.CommandLine" Version="2.0.9" />
-    <PackageVersion Include="Spectre.Console" Version="0.57.1" />
-    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.12.0" />
+    <PackageVersion Include="Spectre.Console" Version="0.57.2" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.13.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
