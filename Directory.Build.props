@@ -55,7 +55,7 @@
 
   <ItemGroup>
     <GlobalPackageReference Include="Meziantou.Analyzer" Version="3.0.117" />
-    <GlobalPackageReference Include="Roslynator.Analyzers" Version="4.15.0" />
+    <GlobalPackageReference Include="Roslynator.Analyzers" Version="5.0.0" />
     <GlobalPackageReference Include="SonarAnalyzer.CSharp" Version="10.27.0.140913" />
     <GlobalPackageReference Include="AsyncFixer" Version="2.1.0" />
     <GlobalPackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="4.14.0" />
