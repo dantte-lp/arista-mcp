@@ -36,6 +36,8 @@
     <PackageVersion Include="System.CommandLine" Version="2.0.9" />
     <PackageVersion Include="Spectre.Console" Version="0.57.1" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.12.0" />
+    <!-- Testcontainers transitively uses SSH.NET; keep NuGet Audit enabled. -->
+    <PackageVersion Include="SSH.NET" Version="2026.0.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
